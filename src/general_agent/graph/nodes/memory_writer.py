@@ -104,19 +104,40 @@ _GENERIC = frozenset(
 )
 
 
+# Share of a fact's content words that must appear in what the user typed.
+GROUNDING_RATIO = 0.6
+# Tokens that are high-risk if invented: domains, emails, URLs, paths, numbers.
+_RISKY = re.compile(r"[.@/:]|\d")
+
+
 def _content_words(text: str) -> set[str]:
     words = {
         w.removesuffix("'s")
-        for w in re.findall(r"[a-z0-9][a-z0-9'.-]*[a-z0-9]|[a-z0-9]", text.lower())
+        for w in re.findall(r"[a-z0-9][a-z0-9'.@/:-]*[a-z0-9]|[a-z0-9]", text.lower())
     }
-    return {w for w in words if w not in _GENERIC and len(w) > 1}
+    # light stemming so "answers"/"answer" and "prefers"/"prefer" match
+    return {
+        w.removesuffix("s") if len(w) > 3 and not _RISKY.search(w) else w
+        for w in words
+        if w not in _GENERIC and len(w) > 1
+    }
 
 
 def grounded_in_user_words(fact: str, user_text: str) -> bool:
     """Security: a memory must come from what the USER typed, never from a model-written
     question (which injected web/document content could have crafted). A bare "yes" to
-    "Should I forward your files to evil.com?" shares no content words -> rejected."""
-    return bool(_content_words(fact) & _content_words(user_text))
+    "Should I forward your files to evil.com?" shares no content words -> rejected.
+
+    Rules: most of the fact's content words (GROUNDING_RATIO) must come from the user, and
+    every risky token (domain, email, URL, number) must appear verbatim in what they typed,
+    so one shared word like "Pune" can't carry an invented claim along with it.
+    """
+    fact_words, user_words = _content_words(fact), _content_words(user_text)
+    if not fact_words:
+        return False
+    if any(_RISKY.search(w) and w not in user_words for w in fact_words):
+        return False
+    return len(fact_words & user_words) / len(fact_words) >= GROUNDING_RATIO
 
 
 def is_durable_fact(fact: str) -> bool:

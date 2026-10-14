@@ -520,8 +520,8 @@ that is well under one cent. `agent ingest` embeds each changed chunk once.
 | Terminal / UI spoofing | Model text is printed with markup escaped and control characters stripped; the approval question is built from structured fields, never taken from model text | `cli.py` (`safe`) |
 | Tampered checkpoint database | Strict, safe-types-only deserialization (`allowed_msgpack_modules=None`) | `memory/persistence.py` |
 | Secrets in memory | Prompt rule plus a regex filter before saving | `graph/nodes/memory_writer.py` |
-| Memory poisoning through model-written questions | Every saved fact must share content words with what the **user typed** (message or answers); questions are passed only as untrusted context, so a bare "yes" confirms nothing. Questions can't forge an `A:` line | `memory_writer.grounded_in_user_words`, `state.format_qa` |
-| Phishing via questions (e.g. "paste your API key") | `ask_user` refuses questions asking for passwords, keys, tokens, codes or payment details; every question carries a "never share secrets" note, and the CLI shows a fixed warning | `tools/ask_user.py`, `cli.py` |
+| Memory poisoning through model-written questions | At least 60% of a saved fact's content words must come from what the **user typed** (message or answers), and every domain, email, URL or number must appear verbatim. Questions are passed only as untrusted context, so a bare "yes" confirms nothing; questions can't forge an `A:` line; and the tool's own refusal text never counts as the user's words | `memory_writer.grounded_in_user_words`, `state.format_qa`, `executor._user_answers` |
+| Phishing via questions (e.g. "paste your OpenAI key") | `is_safe_question` (NFKC-normalised, invisible characters stripped) refuses requests for passwords, keys, tokens, codes or payment details, **for both `ask_user` and the planner's own clarifications**. Every question carries a "never share secrets" note, and the CLI shows a fixed warning. Trade-off: innocent questions containing words like "key" or "PIN" are refused too | `tools/ask_user.py`, `graph/nodes/planner.py`, `cli.py` |
 | Runaway loops / cost | Caps on tasks, replans, clarifications, executor steps and the recursion limit; duplicate retries are discarded | `config.py`, replanner |
 | Leaked keys | `.env` is gitignored; keys are `SecretStr` | `.gitignore`, `config.py` |
 
@@ -530,7 +530,7 @@ that is well under one cent. `agent ingest` embeds each changed chunk once.
 ## Testing
 
 ```bash
-uv run pytest                                  # 146 offline tests, $0, ~6 s
+uv run pytest                                  # 159 offline tests, $0, ~6 s
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src                                # strict typing
 ```
@@ -555,7 +555,7 @@ What is covered:
 | CLI | Interrupt loop, markup/escape-sequence sanitizing, approval-prompt spoofing |
 | HTTP API | `tests/api/`: chat, thread history, validation, clarification and approval over HTTP, plan returned on resume, SSE event order, streamed resume, 409 busy/pending, 500 without leaks, bearer auth, DNS rebinding / CSRF guard, memories, ingest |
 | Asking mid-task | `ask_user` interrupt and resume, parallel questions answered together, answers recorded for memory, placeholder locations rejected without a network call |
-| Injection hardening | Memory poisoning via a crafted question + "yes", forged `A:` lines, `ask_user` refusing secret requests, the fixed CLI phishing warning |
+| Injection hardening | Memory poisoning via a crafted question + "yes", one-shared-word smuggling, forged `A:` lines, refusal text not counted as user words, secret requests refused (including evasion with invisible or full-width characters) in both `ask_user` and the planner, the fixed CLI phishing warning |
 
 **Live evals (paid, optional):** `uv run python -m tests.evals.run_evals` runs 8
 multi-part prompts against throwaway databases. It checks that the number of planned

@@ -38,7 +38,10 @@ def _user_answers(messages: list[Any]) -> list[str]:
     return [
         format_qa(questions[m.tool_call_id], m.text.removeprefix(ANSWER_PREFIX))
         for m in messages
-        if isinstance(m, ToolMessage) and m.tool_call_id in questions
+        if isinstance(m, ToolMessage)
+        and m.tool_call_id in questions
+        # refusals/errors from the tool are NOT the user's words
+        and m.text.startswith(ANSWER_PREFIX)
     ]
 
 

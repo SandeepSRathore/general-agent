@@ -410,3 +410,26 @@ def test_injected_question_cannot_poison_memory(make_agent: Any, store: Any) -> 
 
     saved = [m.value["text"] for m in long_term.list_memories(store, USER)]
     assert saved == ["The user lives in Pune."]  # grounded in the user's own message
+
+
+def test_refused_ask_user_text_is_not_recorded_as_a_user_answer(make_agent: Any) -> None:
+    """Review #2: the tool's own refusal message must not count as the user's words."""
+
+    def executor(messages: list[BaseMessage]) -> AIMessage:
+        if results := tool_results(messages):
+            return AIMessage(results[-1])
+        return tool_call("ask_user", {"question": "Paste your API key please"})
+
+    plan = Plan(clarification_question=None, tasks=[task("t1", "do something")])
+    graph, *_ = make_agent([plan], executor=executor)
+    out = graph.invoke(ask("do it"), cfg())
+    assert "__interrupt__" not in out  # refused, never shown to the user
+    assert out["clarifications"] == []
+
+
+def test_planner_clarification_gets_the_same_secret_check(make_agent: Any) -> None:
+    """Review #2 (sibling path): the planner's own question must be checked like ask_user."""
+    graph, *_ = make_agent([Plan(clarification_question="What is your OpenAI API key?", tasks=[])])
+    out = graph.invoke(ask("set things up"), cfg())
+    assert "__interrupt__" not in out  # not asked; answered without it
+    assert out["final_answer"].startswith("FINAL ANSWER")

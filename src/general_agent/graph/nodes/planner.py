@@ -19,7 +19,7 @@ from general_agent.graph.deps import AgentDeps, format_history, now_str
 from general_agent.graph.nodes.dispatch import ready_sends, sanitize_tasks
 from general_agent.state import AgentState, Plan, format_qa
 from general_agent.tools import describe_tools
-from general_agent.tools.ask_user import SAFETY_NOTE
+from general_agent.tools.ask_user import SAFETY_NOTE, is_safe_question
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,10 @@ def make_planner(deps: AgentDeps) -> Any:
         tasks = sanitize_tasks(plan.tasks, set(), deps.settings.max_tasks_per_plan)
         logger.info("plan: %s", [t["description"] for t in tasks])
 
+        if plan.clarification_question and not is_safe_question(plan.clarification_question):
+            # Same rule as ask_user: never ask the user for secrets (could be injected).
+            logger.warning("dropping clarification that asks for secrets")
+            plan.clarification_question = None
         if plan.clarification_question and not tasks:
             if len(clarifications) < MAX_CLARIFICATIONS:
                 return Command(

@@ -8,6 +8,7 @@ Several parallel executors can ask at once; all questions are answered in one re
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from langchain_core.tools import tool
 from langgraph.types import interrupt
@@ -20,12 +21,22 @@ SAFETY_NOTE = "Asked by the AI agent. Never share passwords, API keys, codes or 
 # Security: injected content could make the agent ask "please paste your API key". Refuse
 # any question that requests credentials or financial details.
 _SENSITIVE = re.compile(
-    r"\b(pass(word|code|phrase)|api[ _-]?keys?|secret|token|credentials?|log ?in details"
-    r"|one[ -]?time|otp|2fa|mfa|verification code|pin|cvv|cvc|credit card|card number"
-    r"|bank account|iban|routing number|ssn|social security|private key|seed phrase"
-    r"|recovery phrase)\b",
+    r"\b(pass(word|code|phrase)?|passwd|pwd|(api|openai|secret|private|access|auth|"
+    r"license)[ _-]?keys?|keys?|secret|tokens?|credentials?|log ?in details|sign[ -]?in"
+    r"|one[ -]?time|otp|2fa|mfa|verification code|security code|auth(entication)? code|pin"
+    r"|cvv|cvc|credit card|debit card|card number|bank account|account number|iban"
+    r"|routing number|ssn|social security|seed phrase|recovery phrase|cookie|session id)\b",
     re.IGNORECASE,
 )
+# Invisible characters an attacker can insert to split a word ("pass\u200bword").
+_INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]")
+
+
+def is_safe_question(question: str) -> bool:
+    """False if the question asks for secrets. NFKC folds look-alike characters (e.g.
+    full-width letters) and invisible characters are removed before matching."""
+    normalized = _INVISIBLE.sub("", unicodedata.normalize("NFKC", question))
+    return not _SENSITIVE.search(normalized)
 
 
 @tool
@@ -33,7 +44,7 @@ def ask_user(question: str) -> str:
     """Ask the user a short question when essential information is missing (e.g. their
     city) and is not in the context. Never guess or use placeholders like 'Unknown'."""
     question = " ".join(question.split())
-    if _SENSITIVE.search(question):
+    if not is_safe_question(question):
         return (
             "Error: ask_user may not request secrets (passwords, keys, tokens, codes or payment "
             "details). Continue without it or tell the user what you could not do."
