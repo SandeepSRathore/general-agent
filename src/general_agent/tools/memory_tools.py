@@ -13,6 +13,7 @@ from langchain_core.tools import BaseTool, tool
 from langgraph.store.base import BaseStore
 
 from general_agent.memory import documents, long_term
+from general_agent.prompts import wrap_untrusted
 
 
 def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
@@ -21,7 +22,11 @@ def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
         """Search long-term memory for facts and preferences about the user (location,
         name, likes, goals...) by meaning. Example query: 'where does the user live'."""
         items = long_term.search_memories(store, user_id, query, limit=5)
-        return long_term.format_items(items) if items else "No relevant memories found."
+        return (
+            wrap_untrusted(long_term.format_items(items))
+            if items
+            else "No relevant memories found."
+        )
 
     @tool
     def search_past_conversations(query: str) -> str:
@@ -30,8 +35,7 @@ def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
         items = long_term.search_conversations(store, user_id, query, limit=4)
         if not items:
             return "No relevant past conversations found."
-        return "<untrusted_data>\n" + long_term.format_items(items, with_dates=True) + \
-            "\n</untrusted_data>"
+        return wrap_untrusted(long_term.format_items(items, with_dates=True))
 
     @tool
     def search_documents(query: str) -> str:
@@ -44,6 +48,6 @@ def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
             f"[source: {it.value['source']} | score {it.score or 0:.2f}]\n{it.value['text']}"
             for it in items
         ]
-        return "<untrusted_data>\n" + "\n\n".join(blocks) + "\n</untrusted_data>"
+        return wrap_untrusted("\n\n".join(blocks))
 
     return [recall_memories, search_past_conversations, search_documents]

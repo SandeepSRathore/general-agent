@@ -53,8 +53,10 @@ def test_document_ingest_is_idempotent(store: SqliteStore, tmp_path: Path) -> No
     (tmp_path / "cooking.txt").unlink()
     third = documents.ingest_directory(store, tmp_path, chunk_size=300, chunk_overlap=0)
     assert third.removed == ["cooking.txt"]
-    assert all(h.value["source"] != "cooking.txt"
-               for h in documents.search_documents(store, "pasta", limit=10))
+    assert all(
+        h.value["source"] != "cooking.txt"
+        for h in documents.search_documents(store, "pasta", limit=10)
+    )
 
 
 def test_memory_tools(store: SqliteStore, tmp_path: Path) -> None:

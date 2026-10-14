@@ -43,8 +43,9 @@ def _delete_chunks(store: BaseStore, source: str) -> None:
             store.delete(DOCS_NS, item.key)
 
 
-def ingest_directory(store: BaseStore, directory: Path, *, chunk_size: int = 1000,
-                     chunk_overlap: int = 150) -> IngestReport:
+def ingest_directory(
+    store: BaseStore, directory: Path, *, chunk_size: int = 1000, chunk_overlap: int = 150
+) -> IngestReport:
     splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     report = IngestReport()
     seen: set[str] = set()

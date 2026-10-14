@@ -51,3 +51,13 @@ def test_tool_returns_error_text_instead_of_raising() -> None:
     out = calculator.invoke({"expression": "1/0"})
     assert out.startswith("Error")
     assert calculator.invoke({"expression": "6*7"}) == "42"
+
+
+@pytest.mark.parametrize(
+    "expr",
+    ["((10**999)**999)**999", "(9**400)*(9**400)*(9**400)", "max(10**399, 2) ** 2", "99**999"],
+)
+def test_huge_intermediate_results_are_rejected(expr: str) -> None:
+    """Regression: nested/chained big-int ops must fail fast instead of exhausting CPU/RAM."""
+    with pytest.raises(CalculatorError, match="too large"):
+        safe_eval(expr)

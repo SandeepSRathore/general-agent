@@ -13,6 +13,29 @@ from langchain_core.tools import tool
 
 MAX_EXPRESSION_LENGTH = 300
 MAX_EXPONENT = 1000
+# Bound every intermediate result: big-int arithmetic on huge numbers (e.g. nested powers
+# like ((10**999)**999)**999) would otherwise exhaust CPU/memory.
+MAX_RESULT_DIGITS = 400
+
+
+class CalculatorError(ValueError):
+    pass
+
+
+def _check_size(value: Any) -> Any:
+    if isinstance(value, int) and value.bit_length() > MAX_RESULT_DIGITS * 3.33:
+        raise CalculatorError(f"Result too large (over {MAX_RESULT_DIGITS} digits).")
+    return value
+
+
+def _safe_pow(base: Any, exponent: Any) -> Any:
+    if abs(exponent) > MAX_EXPONENT:
+        raise CalculatorError(f"Exponent too large (max {MAX_EXPONENT}).")
+    # Estimate digits of the result *before* computing it.
+    if abs(base) > 1 and exponent > 0 and exponent * math.log10(abs(base)) > MAX_RESULT_DIGITS:
+        raise CalculatorError(f"Result too large (over {MAX_RESULT_DIGITS} digits).")
+    return base**exponent
+
 
 _BIN_OPS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
     ast.Add: operator.add,
@@ -21,7 +44,7 @@ _BIN_OPS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
+    ast.Pow: _safe_pow,
 }
 _UNARY_OPS: dict[type[ast.unaryop], Callable[[Any], Any]] = {
     ast.UAdd: operator.pos,
@@ -45,10 +68,6 @@ _FUNCTIONS: dict[str, Callable[..., Any]] = {
 _CONSTANTS = {"pi": math.pi, "e": math.e}
 
 
-class CalculatorError(ValueError):
-    pass
-
-
 def _eval(node: ast.AST) -> Any:
     if isinstance(node, ast.Expression):
         return _eval(node.body)
@@ -58,9 +77,7 @@ def _eval(node: ast.AST) -> Any:
         return _CONSTANTS[node.id]
     if isinstance(node, ast.BinOp) and type(node.op) in _BIN_OPS:
         left, right = _eval(node.left), _eval(node.right)
-        if isinstance(node.op, ast.Pow) and abs(right) > MAX_EXPONENT:
-            raise CalculatorError(f"Exponent too large (max {MAX_EXPONENT}).")
-        return _BIN_OPS[type(node.op)](left, right)
+        return _check_size(_BIN_OPS[type(node.op)](left, right))
     if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
         return _UNARY_OPS[type(node.op)](_eval(node.operand))
     if (
@@ -69,7 +86,9 @@ def _eval(node: ast.AST) -> Any:
         and node.func.id in _FUNCTIONS
         and not node.keywords
     ):
-        return _FUNCTIONS[node.func.id](*(_eval(arg) for arg in node.args))
+        if len(node.args) > 20:
+            raise CalculatorError("Too many function arguments.")
+        return _check_size(_FUNCTIONS[node.func.id](*(_eval(arg) for arg in node.args)))
     raise CalculatorError(f"Unsupported expression element: {ast.dump(node)[:60]}")
 
 

@@ -7,6 +7,8 @@ import logging
 from ddgs import DDGS
 from langchain_core.tools import tool
 
+from general_agent.prompts import wrap_untrusted
+
 logger = logging.getLogger(__name__)
 
 MAX_SNIPPET_CHARS = 400
@@ -21,7 +23,7 @@ def search_web(query: str, max_results: int = 5) -> str:
         f"{(r.get('body') or '')[:MAX_SNIPPET_CHARS]}"
         for i, r in enumerate(results, 1)
     ]
-    return "<untrusted_data>\n" + "\n\n".join(blocks) + "\n</untrusted_data>"
+    return wrap_untrusted("\n\n".join(blocks))
 
 
 @tool

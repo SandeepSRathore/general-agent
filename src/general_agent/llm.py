@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any, cast
 
 from langchain.chat_models import init_chat_model
 from langchain_core.embeddings import Embeddings
@@ -16,21 +17,27 @@ from langchain_openai import OpenAIEmbeddings
 from general_agent.config import get_settings
 
 
-def _api_key_kwargs() -> dict[str, str]:
+def _api_key_kwargs() -> dict[str, Any]:
     key = get_settings().openai_api_key
     return {"api_key": key.get_secret_value()} if key else {}
+
+
+def _chat_model(model: str) -> BaseChatModel:
+    # max_retries: the SDK retries rate limits / transient 5xx with exponential backoff.
+    kwargs: dict[str, Any] = {"max_retries": 3, **_api_key_kwargs()}
+    return cast(BaseChatModel, init_chat_model(model, **kwargs))
 
 
 @lru_cache
 def get_planner_llm() -> BaseChatModel:
     """Stronger model used for planning, replanning and final synthesis."""
-    return init_chat_model(get_settings().planner_model, max_retries=3, **_api_key_kwargs())
+    return _chat_model(get_settings().planner_model)
 
 
 @lru_cache
 def get_executor_llm() -> BaseChatModel:
     """Cheaper/faster model used by the per-task ReAct executors."""
-    return init_chat_model(get_settings().executor_model, max_retries=3, **_api_key_kwargs())
+    return _chat_model(get_settings().executor_model)
 
 
 @lru_cache
@@ -39,5 +46,5 @@ def get_embeddings() -> Embeddings:
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         dimensions=settings.embedding_dims,
-        **_api_key_kwargs(),  # type: ignore[arg-type]
+        **_api_key_kwargs(),
     )

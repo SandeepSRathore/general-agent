@@ -28,8 +28,9 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def save_memory(store: BaseStore, user_id: str, fact: str, *, dedupe_threshold: float = 0.9
-                ) -> bool:
+def save_memory(
+    store: BaseStore, user_id: str, fact: str, *, dedupe_threshold: float = 0.9
+) -> bool:
     """Save a fact unless a near-identical one already exists. Returns True if saved."""
     fact = fact.strip()
     if not fact:
@@ -42,8 +43,7 @@ def save_memory(store: BaseStore, user_id: str, fact: str, *, dedupe_threshold: 
     return True
 
 
-def search_memories(store: BaseStore, user_id: str, query: str, limit: int = 5
-                    ) -> list[SearchItem]:
+def search_memories(store: BaseStore, user_id: str, query: str, limit: int = 5) -> list[SearchItem]:
     return store.search(memories_ns(user_id), query=query, limit=limit)
 
 
@@ -55,8 +55,9 @@ def delete_memory(store: BaseStore, user_id: str, key: str) -> None:
     store.delete(memories_ns(user_id), key)
 
 
-def save_conversation(store: BaseStore, user_id: str, thread_id: str, question: str,
-                      answer: str) -> None:
+def save_conversation(
+    store: BaseStore, user_id: str, thread_id: str, question: str, answer: str
+) -> None:
     text = f"User asked: {question}\nAssistant answered: {answer}"[:MAX_CONVERSATION_CHARS]
     store.put(
         conversations_ns(user_id),
@@ -65,8 +66,9 @@ def save_conversation(store: BaseStore, user_id: str, thread_id: str, question: 
     )
 
 
-def search_conversations(store: BaseStore, user_id: str, query: str, limit: int = 3
-                         ) -> list[SearchItem]:
+def search_conversations(
+    store: BaseStore, user_id: str, query: str, limit: int = 3
+) -> list[SearchItem]:
     return store.search(conversations_ns(user_id), query=query, limit=limit)
 
 

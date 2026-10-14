@@ -78,8 +78,9 @@ def fetch_weather(location: str, client: httpx.Client | None = None) -> str:
 
 
 def _format(place: dict[str, Any], data: dict[str, Any]) -> str:
-    name = ", ".join(str(p) for p in (place.get("name"), place.get("admin1"), place.get("country"))
-                     if p)
+    name = ", ".join(
+        str(p) for p in (place.get("name"), place.get("admin1"), place.get("country")) if p
+    )
     cur = data["current"]
     units = data.get("current_units", {})
     lines = [
@@ -94,7 +95,7 @@ def _format(place: dict[str, Any], data: dict[str, Any]) -> str:
     for i, day in enumerate(daily.get("time", [])):
         lines.append(
             f"- {day}: {WEATHER_CODES.get(daily['weather_code'][i], 'unknown')}, "
-            f"{daily['temperature_2m_min'][i]}–{daily['temperature_2m_max'][i]}°C, "
+            f"{daily['temperature_2m_min'][i]} to {daily['temperature_2m_max'][i]}°C, "
             f"rain chance {daily['precipitation_probability_max'][i]}%"
         )
     return "\n".join(lines)

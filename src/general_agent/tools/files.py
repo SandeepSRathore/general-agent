@@ -15,6 +15,7 @@ from langgraph.types import interrupt
 from pypdf import PdfReader
 
 from general_agent.config import PROJECT_ROOT, get_settings
+from general_agent.prompts import wrap_untrusted
 
 
 class SandboxError(PermissionError):
@@ -86,8 +87,9 @@ class FileSandbox:
         if parts and parts[0] == self.write_root.name:
             given = Path(*parts[1:])  # accept "workspace/foo.txt"
         elif parts and parts[0] in {r.name for r in self.read_roots if r != self.write_root}:
-            raise SandboxError(f"'{parts[0]}/' is read-only; files can only be written to "
-                               f"{self.write_root.name}/.")
+            raise SandboxError(
+                f"'{parts[0]}/' is read-only; files can only be written to {self.write_root.name}/."
+            )
         target = (self.write_root / given).resolve()
         if given.is_absolute() or not target.is_relative_to(self.write_root):
             raise SandboxError(f"Writes are only allowed inside {self.write_root.name}/.")
@@ -116,7 +118,7 @@ def make_file_tools(sandbox: FileSandbox, *, require_approval: bool = True) -> l
         """Read a text, markdown or PDF file from the workspace/ or knowledge/ folders.
         Accepts paths like 'notes.txt', 'knowledge/guide.md' or 'workspace/out.txt'."""
         try:
-            return f"<untrusted_data>\n{sandbox.read(path)}\n</untrusted_data>"
+            return wrap_untrusted(sandbox.read(path))
         except (SandboxError, OSError) as exc:
             return f"Error: {exc}"
 

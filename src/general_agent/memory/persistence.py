@@ -14,11 +14,13 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
+from typing import cast
 
 from langchain_core.embeddings import Embeddings
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.store.sqlite import SqliteStore
+from langgraph.store.sqlite.base import SqliteIndexConfig
 
 
 @contextmanager
@@ -40,12 +42,14 @@ def open_checkpointer(db_path: Path | str) -> Iterator[SqliteSaver]:
 def open_store(db_path: Path | str, embeddings: Embeddings, dims: int) -> Iterator[SqliteStore]:
     if str(db_path) != ":memory:":
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    with SqliteStore.from_conn_string(
-        str(db_path),
-        # Only the "text" field of each item is embedded. NOTE: SqliteStore calls this key
-        # `text_fields` (InMemoryStore/PostgresStore call it `fields`); with the wrong key
-        # it silently embeds the whole JSON value instead.
-        index={"dims": dims, "embed": embeddings, "text_fields": ["text"]},
-    ) as store:
+    # Only the "text" field of each item is embedded. NOTE: SqliteStore's implementation
+    # reads `text_fields`, while its typed config (and Postgres/InMemory stores) use
+    # `fields`. With only `fields` it silently embeds the whole JSON value instead, so we
+    # pass both (keeps working if upstream aligns them).
+    index = cast(
+        SqliteIndexConfig,
+        {"dims": dims, "embed": embeddings, "fields": ["text"], "text_fields": ["text"]},
+    )
+    with SqliteStore.from_conn_string(str(db_path), index=index) as store:
         store.setup()
         yield store

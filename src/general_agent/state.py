@@ -56,6 +56,7 @@ class AgentState(TypedDict, total=False):
     results: Annotated[dict[str, TaskResultDict], merge_results]
     replans: int
     final_answer: str
+    pending_question: str
 
 
 class ExecutorInput(TypedDict):
@@ -68,6 +69,8 @@ class ExecutorInput(TypedDict):
 
 
 # ------------------------------------------------------------ LLM output schemas
+# No field defaults on purpose: OpenAI strict structured outputs require every field to be
+# "required", so the model always fills each one explicitly.
 
 
 class Task(BaseModel):
@@ -77,21 +80,18 @@ class Task(BaseModel):
         "original request. Include all concrete values (cities, numbers, file paths)."
     )
     depends_on: list[str] = Field(
-        default_factory=list,
         description="Ids of EARLIER tasks whose output this task needs. Empty = can run in "
         "parallel immediately.",
     )
-    suggested_tools: list[str] = Field(default_factory=list, description="Tool names likely needed.")
+    suggested_tools: list[str] = Field(description="Tool names likely needed (may be empty).")
 
 
 class Plan(BaseModel):
     clarification_question: str | None = Field(
-        default=None,
         description="Set ONLY if essential information is missing and cannot be found in the "
         "context or via tools. When set, tasks should be empty.",
     )
     tasks: list[Task] = Field(
-        default_factory=list,
         description="Ordered tasks. Empty if the request is small talk or fully answerable from "
         "the conversation/context alone.",
     )
@@ -101,14 +101,13 @@ class ReplanDecision(BaseModel):
     reasoning: str = Field(description="One or two sentences explaining the decision.")
     action: Literal["finish", "add_tasks"]
     new_tasks: list[Task] = Field(
-        default_factory=list,
-        description="Additional tasks when action == 'add_tasks'. Ids must not reuse existing ids.",
+        description="Additional tasks when action == 'add_tasks' (else empty). Ids must not "
+        "reuse existing ids.",
     )
 
 
 class MemoryExtraction(BaseModel):
     facts: list[str] = Field(
-        default_factory=list,
         description="Durable facts or preferences about the user worth remembering across "
         "sessions, each as a short standalone sentence in third person, e.g. "
         "'The user lives in Pune.' Empty if none.",

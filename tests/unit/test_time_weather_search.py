@@ -35,9 +35,20 @@ FORECAST_JSON = {
 @respx.mock
 def test_weather_happy_path() -> None:
     respx.get(GEOCODE_URL).mock(
-        return_value=httpx.Response(200, json={"results": [
-            {"name": "Pune", "admin1": "Maharashtra", "country": "India",
-             "latitude": 18.5, "longitude": 73.8}]})  # fmt: skip
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "name": "Pune",
+                        "admin1": "Maharashtra",
+                        "country": "India",
+                        "latitude": 18.5,
+                        "longitude": 73.8,
+                    }
+                ]
+            },
+        )
     )
     respx.get(FORECAST_URL).mock(return_value=httpx.Response(200, json=FORECAST_JSON))
     out = get_weather.invoke({"location": "Pune"})
