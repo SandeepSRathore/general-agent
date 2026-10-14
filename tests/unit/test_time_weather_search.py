@@ -101,3 +101,38 @@ def test_weather_falls_back_to_name_before_comma() -> None:
     respx.get(GEOCODE_URL).mock(side_effect=geocode)
     respx.get(FORECAST_URL).mock(return_value=httpx.Response(200, json=FORECAST_JSON))
     assert "Pune, India" in get_weather.invoke({"location": "Pune, Maharashtra"})
+
+
+@respx.mock
+def test_weather_skips_yesterday_around_midnight() -> None:
+    """Demo regression: just after midnight Open-Meteo's daily series starts at yesterday,
+    so the '3-day forecast' missed the 3rd day and the agent kept re-fetching it."""
+    data = {
+        "current_units": {},
+        "current": {
+            "time": "2026-10-15T00:15",
+            "temperature_2m": 25.4,
+            "apparent_temperature": 26.1,
+            "relative_humidity_2m": 51,
+            "weather_code": 0,
+            "wind_speed_10m": 5.8,
+        },
+        "daily": {
+            "time": ["2026-10-14", "2026-10-15", "2026-10-16", "2026-10-17"],
+            "weather_code": [1, 0, 3, 2],
+            "temperature_2m_max": [33.0, 32.8, 33.4, 33.1],
+            "temperature_2m_min": [23.0, 22.3, 22.1, 22.0],
+            "precipitation_probability_max": [2, 0, 0, 5],
+        },
+    }
+    respx.get(GEOCODE_URL).mock(
+        return_value=httpx.Response(
+            200, json={"results": [{"name": "Pune", "latitude": 18.5, "longitude": 73.8}]}
+        )
+    )
+    respx.get(FORECAST_URL).mock(return_value=httpx.Response(200, json=data))
+    out = get_weather.invoke({"location": "Pune"})
+    assert "2026-10-14" not in out
+    assert "2026-10-15 (today)" in out
+    assert "2026-10-16 (tomorrow)" in out
+    assert "2026-10-17:" in out

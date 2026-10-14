@@ -133,7 +133,8 @@ def test_parallel_tasks_then_dependent_task(make_agent: Any) -> None:
     assert state["results"]["t2"]["tools_used"] == ["calculator"]
     assert state["final_answer"].startswith("FINAL ANSWER")
     assert "Result is 351" in state["final_answer"]
-    assert planner_llm.structured_calls == ["Plan", "ReplanDecision"]
+    # all tasks succeeded -> no paid replanner call (replan_on_success defaults to False)
+    assert planner_llm.structured_calls == ["Plan"]
 
 
 def test_dependency_results_are_passed_to_dependent_task(make_agent: Any) -> None:
@@ -247,19 +248,64 @@ def test_parallel_approvals_resume_together(make_agent: Any, sandbox: FileSandbo
     assert (sandbox.write_root / "a.txt").exists() and (sandbox.write_root / "b.txt").exists()
 
 
+def failing_lookup_executor(messages: list[BaseMessage]) -> AIMessage:
+    if "lookup" in first_human_text(messages).lower():
+        raise RuntimeError("lookup service down")
+    return AIMessage("ok")
+
+
 def test_replanning_is_bounded(make_agent: Any) -> None:
-    more = ReplanDecision(
-        reasoning="need more", action="add_tasks", new_tasks=[task("x", "another lookup")]
-    )
+    replans = [
+        ReplanDecision(
+            reasoning="retry",
+            action="add_tasks",
+            new_tasks=[task(f"x{i}", f"alternative lookup {name}")],
+        )
+        for i, name in enumerate(["alpha", "beta", "gamma"])
+    ]
     graph, planner_llm, _ = make_agent(
         [Plan(clarification_question=None, tasks=[task("t1", "lookup")])],
-        replans=[more, more, more],
+        executor=failing_lookup_executor,
+        replans=replans,
         max_replans=2,
     )
     out = graph.invoke(ask("research"), cfg())
     assert len(out["plan"]) == 3  # original + 2 replans, the 3rd request is ignored
     assert out["replans"] == 2
     assert planner_llm.structured_calls.count("ReplanDecision") == 2
+
+
+def test_successful_turn_skips_replanner_unless_enabled(make_agent: Any) -> None:
+    plan = Plan(clarification_question=None, tasks=[task("t1", "easy")])
+    graph, planner_llm, _ = make_agent([plan])
+    graph.invoke(ask("easy"), cfg())
+    assert "ReplanDecision" not in planner_llm.structured_calls
+
+    graph, planner_llm, _ = make_agent([plan], replan_on_success=True)
+    graph.invoke(ask("easy"), cfg())
+    assert planner_llm.structured_calls == ["Plan", "ReplanDecision"]
+
+
+def test_replanner_ignores_duplicate_tasks(make_agent: Any) -> None:
+    """Demo regression: nano kept re-adding the same weather task, burning tokens."""
+    duplicate = ReplanDecision(
+        reasoning="again",
+        action="add_tasks",
+        new_tasks=[task("t2", "Lookup the Pune weather forecast")],
+    )
+    graph, planner_llm, _ = make_agent(
+        [
+            Plan(
+                clarification_question=None,
+                tasks=[task("t1", "Lookup the weather forecast for Pune")],
+            )
+        ],
+        executor=failing_lookup_executor,
+        replans=[duplicate, duplicate],
+    )
+    out = graph.invoke(ask("weather"), cfg())
+    assert [t["id"] for t in out["plan"]] == ["t1"]  # duplicate never scheduled
+    assert planner_llm.structured_calls.count("ReplanDecision") == 1
 
 
 def test_failing_task_is_isolated(make_agent: Any) -> None:

@@ -31,6 +31,9 @@ WEATHER_CODES = {
 }  # fmt: skip
 
 
+FORECAST_DAYS = 3
+
+
 class WeatherError(RuntimeError):
     pass
 
@@ -59,7 +62,9 @@ def fetch_weather(location: str, client: httpx.Client | None = None) -> str:
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
                 "precipitation_probability_max",
                 "timezone": "auto",
-                "forecast_days": 3,
+                # Ask for 4 days: around local midnight Open-Meteo's daily series can
+                # still start at yesterday, which is filtered out in _format.
+                "forecast_days": FORECAST_DAYS + 1,
             },
         )
         forecast.raise_for_status()
@@ -98,9 +103,13 @@ def _format(place: dict[str, Any], data: dict[str, Any]) -> str:
         f"wind {cur.get('wind_speed_10m')} {units.get('wind_speed_10m', 'km/h')}",
     ]
     daily = data.get("daily", {})
-    for i, day in enumerate(daily.get("time", [])):
+    today = str(cur.get("time", ""))[:10]  # local date, e.g. "2026-10-15"
+    labels = ["today", "tomorrow"]
+    upcoming = [(i, day) for i, day in enumerate(daily.get("time", [])) if day >= today]
+    for n, (i, day) in enumerate(upcoming[:FORECAST_DAYS]):
+        label = f" ({labels[n]})" if n < len(labels) else ""
         lines.append(
-            f"- {day}: {WEATHER_CODES.get(daily['weather_code'][i], 'unknown')}, "
+            f"- {day}{label}: {WEATHER_CODES.get(daily['weather_code'][i], 'unknown')}, "
             f"{daily['temperature_2m_min'][i]} to {daily['temperature_2m_max'][i]}°C, "
             f"rain chance {daily['precipitation_probability_max'][i]}%"
         )

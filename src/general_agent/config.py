@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # --- Guardrails / limits ---------------------------------------------
     max_tasks_per_plan: int = Field(default=8, ge=1)
     max_replans: int = Field(default=2, ge=0)
+    # Cost saver: only ask the LLM to replan when a task FAILED. Set true to also review
+    # successful results (one extra LLM call per turn).
+    replan_on_success: bool = False
     executor_max_steps: int = Field(default=8, ge=2)
     recursion_limit: int = Field(default=60, ge=10)
     max_file_read_bytes: int = 200_000
