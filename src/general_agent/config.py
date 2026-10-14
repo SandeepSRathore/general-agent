@@ -58,6 +58,12 @@ class Settings(BaseSettings):
 
     log_level: str = "WARNING"
 
+    # --- HTTP API (agent serve) -------------------------------------------
+    # When set, every API request (except /health) needs "Authorization: Bearer <token>".
+    # Required when binding to a non-localhost address.
+    api_token: SecretStr | None = None
+    api_max_message_chars: int = 8000
+
     @property
     def checkpoints_db(self) -> Path:
         """Short-term memory: per-thread graph checkpoints."""

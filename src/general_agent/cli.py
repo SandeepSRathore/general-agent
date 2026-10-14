@@ -10,14 +10,11 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
-from typing import Annotated, Any, cast
+from collections.abc import Iterator
+from typing import Annotated, Any
 
 import typer
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessageChunk, HumanMessage
-from langchain_core.runnables import RunnableConfig
-from langgraph.types import Command, Interrupt
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -27,6 +24,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 
+from general_agent import service
 from general_agent.app import AgentSession, agent_session, open_memory_store
 from general_agent.config import PROJECT_ROOT, get_settings
 from general_agent.logging_setup import configure_logging
@@ -101,8 +99,8 @@ def _render_result(result: dict[str, Any]) -> None:
     console.print(f"  {icon} {safe(result['task_id'])}: {safe(result['description'])}{tools}")
 
 
-def _ask_human(intr: Interrupt) -> Any:
-    payload = intr.value if isinstance(intr.value, dict) else {"question": str(intr.value)}
+def _ask_human(payload: dict[str, Any]) -> Any:
+    """Ask the user about one interrupt (see service.interrupt_to_dict for the shape)."""
     if payload.get("type") == "approval":
         # The question is built here from structured fields, never taken verbatim from the
         # payload, and the preview is rendered as plain text, not markup.
@@ -129,84 +127,63 @@ def _ask_human(intr: Interrupt) -> Any:
 
 def run_turn(session: AgentSession, thread_id: str, user_input: str | None) -> str:
     """Run one user turn to completion, handling any number of human-in-the-loop pauses."""
-    config: RunnableConfig = {
-        "configurable": {"thread_id": thread_id},
-        "recursion_limit": session.settings.recursion_limit,
-    }
-    graph_input: Any = {"messages": [HumanMessage(user_input)]} if user_input else None
+    config = service.make_config(thread_id, session.settings.recursion_limit)
+    graph_input: Any = service.message_input(user_input) if user_input else None
 
     while True:
-        answer = _stream(session, graph_input, config)
-        pending = session.graph.get_state(config).interrupts
-        if not pending:
+        answer, interrupts = _render_events(service.stream_turn(session.graph, config, graph_input))
+        if not interrupts:
             return answer
-        graph_input = Command(resume={intr.id: _ask_human(intr) for intr in pending})
+        graph_input = service.resume_input({i["id"]: _ask_human(i) for i in interrupts})
 
 
-def _stream(session: AgentSession, graph_input: Any, config: RunnableConfig) -> str:
+def _answer_panel(text: str) -> Panel:
+    return Panel(Markdown(_CONTROL_CHARS.sub("", text)), title="Answer", border_style="green")
+
+
+def _render_events(events: Iterator[service.Event]) -> tuple[str, list[dict[str, Any]]]:
+    """Render one streamed turn; returns (answer, pending interrupts)."""
     answer = ""
+    interrupts: list[dict[str, Any]] = []
     live: Live | None = None
     status = console.status("[dim]Thinking…[/dim]", spinner="dots")
     status.start()
     try:
-        # With several stream modes, each item is a (mode, chunk) tuple.
-        for item in session.graph.stream(graph_input, config, stream_mode=["updates", "messages"]):
-            mode, chunk = cast(tuple[str, Any], item)
-            if mode == "messages":
-                message, meta = chunk
-                # Stream only the final answer's tokens (not planner/executor internals).
-                if meta.get("langgraph_node") == "synthesizer" and isinstance(
-                    message, AIMessageChunk
-                ):
-                    if live is None:
-                        status.stop()
-                        live = Live(console=console, refresh_per_second=12)
-                        live.start()
-                    answer += message.text
-                    live.update(
-                        Panel(
-                            Markdown(_CONTROL_CHARS.sub("", answer)),
-                            title="Answer",
-                            border_style="green",
-                        )
-                    )
-                continue
-
-            for node, update in chunk.items():
-                if not isinstance(update, dict):
-                    continue
-                # A planner update that sets pending_question routes to clarify: no plan yet.
-                if node == "planner" and "plan" in update and not update.get("pending_question"):
+        for event in events:
+            kind = event["type"]
+            if kind == "token":
+                if live is None:
                     status.stop()
-                    _render_plan(update["plan"])
-                    status.update("[dim]Running tasks…[/dim]")
-                    status.start()
-                elif node == "executor":
-                    for result in update.get("results", {}).values():
-                        _render_result(result)
-                elif node == "replanner" and "plan" in update:
+                    live = Live(console=console, refresh_per_second=12)
+                    live.start()
+                answer += event["text"]
+                live.update(_answer_panel(answer))
+            elif kind == "plan":
+                status.stop()
+                _render_plan(event["plan"])
+                status.update("[dim]Running tasks…[/dim]")
+                status.start()
+            elif kind == "task_result":
+                _render_result(event["result"])
+            elif kind == "replan":
+                status.stop()
+                console.print("[magenta]↻ Replanning: adding follow-up tasks[/magenta]")
+                _render_plan(event["plan"], title="Updated plan")
+                status.start()
+            elif kind == "answer":
+                status.update("[dim]Saving memories…[/dim]")
+                if live is None:  # model did not stream: render the full answer once
                     status.stop()
-                    console.print("[magenta]↻ Replanning: adding follow-up tasks[/magenta]")
-                    _render_plan(update["plan"], title="Updated plan")
+                    answer = event["text"]
+                    console.print(_answer_panel(answer))
                     status.start()
-                elif node == "synthesizer":
-                    status.update("[dim]Saving memories…[/dim]")
-                    if live is None:  # model did not stream: render the full answer once
-                        status.stop()
-                        answer = update.get("final_answer", "")
-                        console.print(
-                            Panel(
-                                Markdown(_CONTROL_CHARS.sub("", answer)),
-                                title="Answer",
-                                border_style="green",
-                            )
-                        )
-                        status.start()
+            elif kind == "interrupted":
+                interrupts = event["interrupts"]
     finally:
         if live is not None:
             live.stop()
         status.stop()
-    return answer
+    return answer, interrupts
 
 
 # ----------------------------------------------------------------------- commands
@@ -218,7 +195,7 @@ def chat(
 ) -> None:
     """Interactive chat session."""
     _require_api_key()
-    thread_id = thread or uuid.uuid4().hex[:12]
+    thread_id = thread or service.new_thread_id()
     with agent_session() as session:
         console.print(
             Panel.fit(
@@ -247,7 +224,7 @@ def chat(
                     console.print("Bye!")
                     return
                 if command == "/new":
-                    thread_id = uuid.uuid4().hex[:12]
+                    thread_id = service.new_thread_id()
                     console.print(f"[green]New thread {thread_id}[/green]")
                 elif command == "/thread":
                     console.print(f"thread id: {thread_id}")
@@ -274,7 +251,29 @@ def ask(
     """Ask a single question and print the answer."""
     _require_api_key()
     with agent_session() as session:
-        run_turn(session, thread or uuid.uuid4().hex[:12], question)
+        run_turn(session, thread or service.new_thread_id(), question)
+
+
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port.")] = 8000,
+) -> None:
+    """Run the HTTP API (FastAPI). Interactive docs at http://HOST:PORT/docs."""
+    _require_api_key()
+    if host not in LOCAL_HOSTS and not get_settings().api_token:
+        console.print(
+            f"[red]Refusing to listen on {safe(host)} without API_TOKEN.[/red] Anyone on the "
+            "network could use your OpenAI key. Set API_TOKEN in .env or bind to 127.0.0.1."
+        )
+        raise typer.Exit(1)
+    import uvicorn
+
+    console.print(f"Docs: http://{safe(host)}:{port}/docs")
+    uvicorn.run("general_agent.api:create_app", factory=True, host=host, port=port)
 
 
 @app.command()

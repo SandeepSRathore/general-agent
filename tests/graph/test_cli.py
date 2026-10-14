@@ -68,8 +68,6 @@ def test_safe_escapes_markup_and_strips_terminal_escapes() -> None:
 
 
 def test_approval_prompt_ignores_payload_question(monkeypatch: pytest.MonkeyPatch) -> None:
-    from langgraph.types import Interrupt
-
     shown: list[str] = []
 
     def fake_confirm(question: str, **_: Any) -> bool:
@@ -77,16 +75,14 @@ def test_approval_prompt_ignores_payload_question(monkeypatch: pytest.MonkeyPatc
         return False
 
     monkeypatch.setattr(cli.Confirm, "ask", fake_confirm)
-    intr = Interrupt(
-        value={
-            "type": "approval",
-            "action": "write_file",
-            "path": "workspace/[red]x.txt",
-            "preview": "[bold]hi",
-            "question": "Allow writing to totally-safe.txt?",
-        },
-        id="i1",
-    )
-    assert cli._ask_human(intr) == "no"
+    payload = {
+        "id": "i1",
+        "type": "approval",
+        "action": "write_file",
+        "path": "workspace/[red]x.txt",
+        "preview": "[bold]hi",
+        "question": "Allow writing to totally-safe.txt?",
+    }
+    assert cli._ask_human(payload) == "no"
     assert "totally-safe" not in shown[0]
     assert "\\[red]x.txt" in shown[0]

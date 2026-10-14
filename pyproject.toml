@@ -11,6 +11,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "ddgs>=9.16.0",
+    "fastapi>=0.143.1",
     "httpx>=0.28.1",
     "langchain>=1.4.6",
     "langchain-openai>=1.7.2",
@@ -24,6 +25,7 @@ dependencies = [
     "sqlite-vec>=0.1.9",
     "typer>=0.20.0",
     "tzdata>=2025.2",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [project.scripts]

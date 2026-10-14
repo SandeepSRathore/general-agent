@@ -15,7 +15,8 @@ live, what's 15% of 2340, and according to my notes what is ReAct?"*. The agent 
    (semantic search) in future sessions
 
 It **asks you** when information is missing ("which city do you live in?") and **before
-writing any file**.
+writing any file**. You can use it from the **terminal** or through an **HTTP API** (FastAPI,
+with streaming).
 
 ---
 
@@ -25,6 +26,7 @@ writing any file**.
 - [Quick start](#quick-start)
 - [Using the agent](#using-the-agent)
 - [Example session](#example-session)
+- [HTTP API (FastAPI)](#http-api-fastapi)
 - [How it works](#how-it-works)
 - [Memory and semantic search](#memory-and-semantic-search)
 - [Tools](#tools)
@@ -95,6 +97,7 @@ uv run agent chat            # start chatting
 | `uv run agent chat` | Interactive chat. Each run starts a new conversation thread. |
 | `uv run agent chat --thread <id>` | Resume a previous conversation (short-term memory) by its thread id. |
 | `uv run agent ask "question"` | Ask one question, print the answer, and exit. |
+| `uv run agent serve` | Start the HTTP API at http://127.0.0.1:8000 (docs at `/docs`). See [HTTP API](#http-api-fastapi). |
 | `uv run agent ingest` | (Re)index `knowledge/` (`.md`, `.txt`, `.pdf`). Unchanged files are skipped and deleted files are removed from the index. |
 | `uv run agent memories` | List what the agent remembers about you. |
 | `uv run agent memories --clear` | Delete all long-term memories (asks for confirmation). |
@@ -174,6 +177,99 @@ You: /memories
 
 Note that "where I live" was resolved to **Pune from long-term memory**, and the four tasks ran
 **at the same time**.
+
+---
+
+## HTTP API (FastAPI)
+
+```bash
+uv run agent serve                    # http://127.0.0.1:8000, interactive docs at /docs
+uv run agent serve --port 9000
+API_TOKEN=change-me uv run agent serve --host 0.0.0.0   # a token is required off localhost
+```
+
+The API uses the same graph, memory and tools as the CLI. Both share one turn runner,
+`service.stream_turn`.
+
+### Endpoints
+
+| Method & path | What it does |
+|---|---|
+| `GET /health` | Liveness check (no token needed) |
+| `POST /chat` | `{"message": "...", "thread_id": "optional"}` runs a full turn and returns JSON |
+| `POST /chat/stream` | Same as `/chat`, but streams [Server-Sent Events](#streaming-sse) |
+| `POST /chat/{thread_id}/resume` | `{"answers": {"<interrupt id>": "..."}}` answers pending questions and continues |
+| `POST /chat/{thread_id}/resume/stream` | Same as `/resume`, streamed |
+| `GET /threads/{thread_id}` | Conversation history plus any pending questions |
+| `GET /memories` | Long-term memories (no API cost) |
+| `DELETE /memories` | Clear long-term memories |
+| `POST /ingest` | Re-index `knowledge/` (embeds changed chunks only) |
+
+A turn's response (`POST /chat` or `/resume`):
+
+```json
+{
+  "thread_id": "1d8859254b55",
+  "status": "completed",
+  "answer": "1. Time in Tokyo: 03:49 JST …",
+  "plan": [{"id": "t1", "description": "…", "depends_on": [], "suggested_tools": []}],
+  "results": [{"task_id": "t1", "status": "done", "output": "…", "tools_used": ["get_current_time"]}],
+  "interrupts": []
+}
+```
+
+### Human-in-the-loop over HTTP
+
+When the agent needs you, the turn returns `status: "interrupted"` instead of an answer:
+
+```bash
+curl -s localhost:8000/chat -H 'Content-Type: application/json' \
+     -d '{"message": "What is the weather where I live?"}'
+# {"thread_id":"a1b2c3d4e5f6","status":"interrupted","answer":null,
+#  "interrupts":[{"id":"9f…","type":"clarification","question":"Which city do you live in?"}], …}
+
+curl -s localhost:8000/chat/a1b2c3d4e5f6/resume -H 'Content-Type: application/json' \
+     -d '{"answers": {"9f…": "Pune"}}'
+# {"status":"completed","answer":"Pune is clear, 25°C …", …}
+```
+
+- **Clarifications** take a text answer.
+- **File-write approvals** (`"type": "approval"`, with `path` and `preview`) take
+  `true`/`false` or `"yes"`/`"no"`. Nothing is written unless you approve.
+- You must answer **every** pending interrupt id in one call (422 lists the expected ids).
+- Sending a new message to a thread that still has questions pending returns **409**,
+  with the questions included.
+
+### Streaming (SSE)
+
+`POST /chat/stream` returns `text/event-stream`. Each event is
+`event: <type>` followed by `data: <json>`:
+
+| Event | Data |
+|---|---|
+| `start` | `{"thread_id"}` (always first) |
+| `plan` / `replan` | `{"plan": [...]}` |
+| `task_result` | `{"result": {...}}`, one per finished task |
+| `token` | `{"text": "..."}`, a piece of the final answer (when the model streams) |
+| `answer` | `{"text": "..."}`, the full final answer |
+| `done` / `interrupted` / `error` | the last event: `{"answer"}` / `{"interrupts"}` / `{"message"}` |
+
+```bash
+curl -N localhost:8000/chat/stream -H 'Content-Type: application/json' \
+     -d '{"message": "What time is it in Tokyo and what is 15% of 2340?"}'
+```
+
+### API security
+
+- The API binds to **127.0.0.1** by default. `agent serve` **refuses** any other host
+  unless `API_TOKEN` is set, because anyone who can reach the API spends your OpenAI
+  credit.
+- With `API_TOKEN` set, every request except `/health` needs
+  `Authorization: Bearer <token>`. The token is compared in constant time.
+- Each conversation thread handles **one turn at a time**; a concurrent request for the
+  same thread gets **409**. Different threads run in parallel.
+- Message size is capped (`API_MAX_MESSAGE_CHARS`). Errors return
+  `"Agent failed: <ErrorType>"` without internal details; full details go to the server log.
 
 ---
 
@@ -348,6 +444,8 @@ variables or from `.env` (names are case-insensitive).
 | `MEMORY_DEDUPE_THRESHOLD` | `0.9` | Similarity above which a new memory counts as a duplicate |
 | `REQUIRE_WRITE_APPROVAL` | `true` | Ask before `write_file` |
 | `LOG_LEVEL` | `WARNING` | Set `INFO` to see each step, or `DEBUG` for full tracebacks |
+| `API_TOKEN` | — | If set, the HTTP API requires `Authorization: Bearer <token>`. Required for a non-localhost `--host` |
+| `API_MAX_MESSAGE_CHARS` | `8000` | Longest message accepted by the API |
 | `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | off | Optional tracing at smith.langchain.com |
 
 **Other providers:** install the integration (for example `uv add langchain-anthropic`)
@@ -399,7 +497,7 @@ that is well under one cent. `agent ingest` embeds each changed chunk once.
 ## Testing
 
 ```bash
-uv run pytest                                  # 97 offline tests, $0, ~1 s
+uv run pytest                                  # 115 offline tests, $0, ~5 s
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src                                # strict typing
 ```
@@ -422,6 +520,7 @@ What is covered:
 | Memory | Semantic ranking, dedupe, per-user isolation, idempotent ingestion, strict checkpoint round-trip, the durable-fact filter |
 | Graph | `tests/graph/`: parallel fan-out and dependency waves, clarification interrupt/resume, bounded clarifications, write approval yes/no, parallel approvals, bounded replanning, skipped replanner on success, duplicate-task filter, failure isolation, per-turn reset |
 | CLI | Interrupt loop, markup/escape-sequence sanitizing, approval-prompt spoofing |
+| HTTP API | `tests/api/`: chat, thread history, validation, clarification and approval over HTTP, SSE event order, streamed resume, 409 busy/pending, 500 without leaks, bearer auth, memories, ingest |
 
 **Live evals (paid, optional):** `uv run python -m tests.evals.run_evals` runs 8
 multi-part prompts against throwaway databases. It checks that the number of planned
@@ -439,7 +538,9 @@ src/general_agent/
   prompts.py           all prompts, plus untrusted-data wrapping
   state.py             graph state (TypedDicts) + LLM output schemas (Pydantic)
   app.py               composition root: wires settings, models, storage, tools, graph
-  cli.py               Typer + Rich terminal UI, streaming, interrupt handling
+  service.py           UI-agnostic turn runner (events) shared by the CLI and the API
+  cli.py               Typer + Rich terminal UI, streaming, interrupt handling, `serve`
+  api.py               FastAPI app: chat, resume, SSE streaming, threads, memories, auth
   logging_setup.py     Rich logging; quiets noisy libraries
   graph/
     builder.py         assembles and compiles the StateGraph
@@ -455,6 +556,7 @@ tests/
   conftest.py          offline store fixture + fake embeddings
   unit/                tool and memory tests
   graph/               whole-graph and CLI tests with scripted fake models
+  api/                 HTTP API tests (FastAPI TestClient + fake models)
   evals/run_evals.py   live model-judged evaluation (paid)
 knowledge/             your documents for semantic search (sample: agent-concepts.md)
 workspace/             the only folder the agent may write to (gitignored contents)
@@ -496,7 +598,7 @@ docs/design.md         the original design/plan this project was built from
 
 - **`gpt-5-nano` quality:** it sometimes plans tool work for a plain statement, and it can
   be wordy even when you asked for short answers. Stronger models fix this, at a cost.
-- **One user per installation:** `USER_ID` is fixed per process. For multiple users,
+- **One user per installation:** `USER_ID` is fixed per process (and per API server). For multiple users,
   build the graph per user or pass the user id through the runtime config.
 - **SQLite storage:** fine for a single machine. For a multi-user service, switch to
   `PostgresSaver` / `PostgresStore`.
@@ -528,9 +630,10 @@ docs/design.md         the original design/plan this project was built from
    exactly when to use it.
 2. **Change planning behavior:** edit the prompts in `prompts.py`, or add rules to
    `dispatch.sanitize_tasks`. Add a graph test using `ScriptedChatModel`.
-3. **Stream executor progress** with `stream_mode="custom"` and `get_stream_writer()`.
-4. **Expose it as an API:** reuse `app.agent_session()` and the loop in `cli.run_turn`
-   inside a FastAPI endpoint.
+3. **Stream executor progress** with `stream_mode="custom"` and `get_stream_writer()`, and
+   send it as a new SSE event type from `service.stream_turn`.
+4. **Build a web UI** on top of `POST /chat/stream` (SSE), for example a small React or
+   HTMX page that renders the `plan`, `task_result` and `token` events.
 5. **Go multi-user:** switch to `PostgresSaver` / `PostgresStore`, and pass the user id
    through the runtime config instead of `USER_ID`.
 6. **Expire memories:** set TTLs on the store, or add a "forget X" command.
