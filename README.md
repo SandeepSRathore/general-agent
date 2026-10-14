@@ -38,6 +38,7 @@ writing any file**.
 - [Known limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
 - [Extending the agent](#extending-the-agent)
+- [License](#license)
 
 ---
 
@@ -533,3 +534,9 @@ docs/design.md         the original design/plan this project was built from
 5. **Go multi-user:** switch to `PostgresSaver` / `PostgresStore`, and pass the user id
    through the runtime config instead of `USER_ID`.
 6. **Expire memories:** set TTLs on the store, or add a "forget X" command.
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 SandeepSRathore

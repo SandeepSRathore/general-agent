@@ -3,6 +3,8 @@ name = "general-agent"
 version = "0.1.0"
 description = "A plan-and-execute AI agent built with LangChain + LangGraph, with SQLite memory and semantic search."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "SandeepSRathore", email = "sandeeprathore9211@gmail.com" }
 ]
