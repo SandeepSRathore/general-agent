@@ -127,7 +127,9 @@ def test_parallel_tasks_then_dependent_task(make_agent: Any) -> None:
     assert waves == [{"t1", "t2"}, {"t3"}]  # t1 & t2 parallel; t3 waits for t1
     state = graph.get_state(cfg()).values
     assert all(r["status"] == "done" for r in state["results"].values())
-    assert state["results"]["t2"]["output"] == "Result is 351"
+    # executor's own words + the raw tool output as ground truth for the synthesizer
+    assert state["results"]["t2"]["output"] == "Result is 351\n\nRaw tool output:\n[calculator] 351"
+    assert "Raw tool output" not in state["results"]["t1"]["output"]  # no tools used
     assert state["results"]["t2"]["tools_used"] == ["calculator"]
     assert state["final_answer"].startswith("FINAL ANSWER")
     assert "Result is 351" in state["final_answer"]

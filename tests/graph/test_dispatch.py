@@ -28,3 +28,54 @@ def test_ready_sends_respects_dependencies() -> None:
     sends = ready_sends(state)
     assert [s.arg["task"]["id"] for s in sends] == ["c"]
     assert [r["task_id"] for r in sends[0].arg["dependency_results"]] == ["a", "b"]
+
+
+def test_sanitize_drops_synthesis_task() -> None:
+    """Demo regression: nano added a 'prepare the answer' task; the synthesizer does that."""
+    tasks = [
+        t("t1"),
+        t("t2"),
+        Task(
+            id="t3",
+            description="Prepare a concise answer combining the results above",
+            depends_on=["t1", "t2"],
+            suggested_tools=[],
+        ),
+    ]
+    assert [c["id"] for c in sanitize_tasks(tasks, set(), 10)] == ["t1", "t2"]
+
+
+def test_sanitize_keeps_real_tasks_that_look_similar() -> None:
+    tasks = [
+        t("t1"),
+        t("t2"),
+        # depends on 2 tasks but saves a file -> real work, keep it
+        Task(
+            id="t3",
+            description="Write a summary of the results to report.txt",
+            depends_on=["t1", "t2"],
+            suggested_tools=["write_file"],
+        ),
+        # summarizing something specific with no dependencies -> keep
+        Task(
+            id="t4",
+            description="Summarize what the notes say about ReAct",
+            depends_on=[],
+            suggested_tools=[],
+        ),
+    ]
+    assert [c["id"] for c in sanitize_tasks(tasks, set(), 10)] == ["t1", "t2", "t3", "t4"]
+
+
+def test_sanitize_drops_conditional_fallback_without_dependencies() -> None:
+    """Demo regression: 'If notes are not found, ...' with no deps can't check its condition."""
+    tasks = [
+        t("t1"),
+        Task(
+            id="t2",
+            description="If notes are not found, use search_documents instead",
+            depends_on=[],
+            suggested_tools=[],
+        ),
+    ]
+    assert [c["id"] for c in sanitize_tasks(tasks, set(), 10)] == ["t1"]

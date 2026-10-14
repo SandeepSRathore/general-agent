@@ -79,3 +79,14 @@ def test_workspace_outside_project_root(tmp_path: Path) -> None:
         box.resolve_write_target(str(tmp_path / "haiku.txt"))  # absolute outside
     with pytest.raises(SandboxError):
         box.resolve_write_target("workspace")  # the folder itself is not a file
+
+
+def test_write_file_result_echoes_written_content(sandbox: FileSandbox) -> None:
+    """Demo regression: the final answer quoted different text than what was saved.
+    Echoing the content gives the synthesizer the ground truth."""
+    from general_agent.tools.files import make_file_tools
+
+    write = make_file_tools(sandbox, require_approval=False)[2]
+    out = write.invoke({"path": "r.txt", "content": "line one\nline two"})
+    assert "Wrote 17 characters to workspace/r.txt" in out
+    assert "line one\nline two" in out

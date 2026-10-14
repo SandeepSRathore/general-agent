@@ -175,7 +175,12 @@ def make_file_tools(sandbox: FileSandbox, *, require_approval: bool = True) -> l
             written = sandbox.write(path, content)
         except (SandboxError, OSError) as exc:
             return f"Error: {exc}"
-        return f"Wrote {len(content)} characters to {sandbox.display_path(written)}"
+        # Echo what was written so later steps report the real content, not a paraphrase.
+        preview = content if len(content) <= 1000 else content[:1000] + "\n...[truncated]"
+        return (
+            f"Wrote {len(content)} characters to {sandbox.display_path(written)}. "
+            f"Exact content written:\n{preview}"
+        )
 
     return [read_file, list_directory, write_file]
 

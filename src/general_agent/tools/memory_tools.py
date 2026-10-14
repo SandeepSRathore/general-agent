@@ -19,8 +19,8 @@ from general_agent.prompts import wrap_untrusted
 def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
     @tool
     def recall_memories(query: str) -> str:
-        """Search long-term memory for facts and preferences about the user (location,
-        name, likes, goals...) by meaning. Example query: 'where does the user live'."""
+        """Recall remembered FACTS ABOUT THE USER (location, name, preferences) - NOT notes/docs.
+        Searches by meaning. Example query: 'where does the user live'."""
         items = long_term.search_memories(store, user_id, query, limit=5)
         return (
             wrap_untrusted(long_term.format_items(items))
@@ -30,8 +30,8 @@ def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
 
     @tool
     def search_past_conversations(query: str) -> str:
-        """Semantically search earlier conversations with the user (across sessions).
-        Use for questions like 'what did we discuss about X?'."""
+        """Search what was SAID IN EARLIER CHATS with the user - NOT notes or documents.
+        Use only for questions like 'what did we discuss about X?'."""
         items = long_term.search_conversations(store, user_id, query, limit=4)
         if not items:
             return "No relevant past conversations found."
@@ -39,8 +39,8 @@ def make_memory_tools(store: BaseStore, user_id: str) -> list[BaseTool]:
 
     @tool
     def search_documents(query: str) -> str:
-        """Semantic search over the indexed knowledge-base documents (files in knowledge/).
-        Returns the most relevant passages with their source file."""
+        """Search the user's NOTES and DOCUMENTS (knowledge base) - use for 'my notes/docs/files'.
+        Semantic search over files in knowledge/; returns relevant passages with sources."""
         items = documents.search_documents(store, query, limit=4)
         if not items:
             return "No matching documents. (Has `agent ingest` been run?)"

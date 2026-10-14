@@ -61,6 +61,10 @@ Rules:
 - Return NO tasks when the request is small talk, a statement for you to remember
   (e.g. "remember that I live in Pune"; memory is saved automatically), or is fully
   answerable from the conversation/context alone.
+- Never add a task that combines, summarizes or presents other tasks' results, and never
+  add conditional/fallback tasks ("if X fails, do Y"); the system handles both.
+- Pick the right source: "my notes / docs / files" -> search_documents; facts about the
+  user -> recall_memories; "what did we discuss" -> search_past_conversations.
 - Set clarification_question ONLY when essential information is missing AND it is not in
   the context, not in the conversation, and cannot be obtained with tools (e.g. "what's
   the weather where I live?" with no known location). Otherwise make reasonable
@@ -120,6 +124,8 @@ Current date/time: {now}
   every part of the request, in the order the user asked.
 - Use short headings or bullets when the request had several parts.
 - Be honest: if a task failed or data is missing, say so briefly. Never invent results.
+- Facts come from "Raw tool output" when present: copy numbers, times, names and file
+  contents EXACTLY from it. Never rewrite or paraphrase what was saved to a file.
 - Use the known context and conversation naturally (e.g. the user's name/city).
 - If there were no tasks, simply answer conversationally (e.g. acknowledge a fact the
   user asked you to remember; it is stored automatically).
@@ -146,8 +152,10 @@ Task results:
 
 MEMORY_EXTRACTION_SYSTEM = """Extract durable facts about the USER from their message that
 would be useful in future conversations: identity, location, preferences, goals,
-relationships, recurring constraints. Ignore one-off requests, questions, and anything
-about the assistant. Never store secrets (passwords, API keys, card numbers).
+relationships, recurring constraints. Do NOT store what the user asked for in this
+message (e.g. "the user asked to save a file"): requests, tasks and questions are not
+facts. Ignore anything about the assistant. Never store secrets (passwords, API keys,
+card numbers).
 Facts confirmed in clarification answers count too.
 Return an empty list if nothing qualifies.
 

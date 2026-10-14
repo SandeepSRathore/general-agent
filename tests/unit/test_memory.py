@@ -90,3 +90,15 @@ def test_empty_queries_short_circuit(store: SqliteStore) -> None:
     assert long_term.search_memories(store, USER, "  ") == []
     assert long_term.search_conversations(store, USER, "") == []
     assert documents.search_documents(store, "") == []
+
+
+def test_tool_descriptions_disambiguate_notes_vs_conversations(store: SqliteStore) -> None:
+    """Demo regression: nano searched past conversations for 'my notes'. The first line of
+    each description (what the planner sees) must say which source it covers."""
+    recall, past, docs = make_memory_tools(store, USER)
+    first = {
+        tool.name: (tool.description or "").splitlines()[0].lower() for tool in (recall, past, docs)
+    }
+    assert "notes" in first["search_documents"]
+    assert "not" in first["search_past_conversations"]  # "...NOT notes/documents"
+    assert "not" in first["recall_memories"]

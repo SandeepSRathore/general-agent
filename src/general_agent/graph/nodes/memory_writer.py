@@ -9,6 +9,7 @@ Failures are logged, never raised: the user already has their answer.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -22,6 +23,25 @@ from general_agent.state import AgentState, MemoryExtraction
 logger = logging.getLogger(__name__)
 
 MAX_FACTS_PER_TURN = 5
+
+# Small models tend to "remember" the request itself ("The user asked to save X").
+# Those are one-off actions, not facts about the user, so they're filtered in code.
+_ONE_OFF_REQUEST = re.compile(
+    r"\b(asked|asks|requested|requests|wants? (you|the assistant|me) to|would like (you|me)"
+    r"|instructed|told (you|the assistant|me) to)\b",
+    re.IGNORECASE,
+)
+# Defense in depth on top of the prompt: never persist anything that looks like a secret.
+_SECRET = re.compile(
+    r"\b(sk|pk|lsv2|ghp|xox[abp])[-_][A-Za-z0-9_-]{8,}|\b(api[ _-]?key|password|passcode"
+    r"|secret|token|cvv|card number)\b",
+    re.IGNORECASE,
+)
+
+
+def is_durable_fact(fact: str) -> bool:
+    fact = fact.strip()
+    return bool(fact) and not _ONE_OFF_REQUEST.search(fact) and not _SECRET.search(fact)
 
 
 def make_memory_writer(deps: AgentDeps) -> Any:
@@ -46,7 +66,8 @@ def make_memory_writer(deps: AgentDeps) -> Any:
                     ]
                 ),
             )
-            for fact in extraction.facts[:MAX_FACTS_PER_TURN]:
+            facts = [f for f in extraction.facts if is_durable_fact(f)]
+            for fact in facts[:MAX_FACTS_PER_TURN]:
                 if long_term.save_memory(
                     deps.store,
                     deps.user_id,

@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphBubbleUp, GraphRecursionError
 
 from general_agent import prompts
@@ -18,6 +18,22 @@ from general_agent.graph.deps import AgentDeps, format_results, now_str
 from general_agent.state import ExecutorInput, TaskResultDict
 
 logger = logging.getLogger(__name__)
+
+# Raw tool outputs attached to each result so the synthesizer can quote ground truth
+# instead of trusting the executor's paraphrase. Kept short: input tokens cost money.
+MAX_TOOL_OUTPUT_CHARS = 1200
+MAX_TOOL_OUTPUTS_TOTAL = 3000
+
+
+def _tool_evidence(messages: list[Any]) -> str:
+    parts: list[str] = []
+    used = 0
+    for m in messages:
+        if isinstance(m, ToolMessage) and used < MAX_TOOL_OUTPUTS_TOTAL:
+            text = m.text[: min(MAX_TOOL_OUTPUT_CHARS, MAX_TOOL_OUTPUTS_TOTAL - used)]
+            used += len(text)
+            parts.append(f"[{m.name}] {text}")
+    return "\n".join(parts)
 
 
 def make_executor(deps: AgentDeps) -> Any:
@@ -53,6 +69,8 @@ def make_executor(deps: AgentDeps) -> Any:
             )
             messages = out["messages"]
             result["output"] = messages[-1].text or "(empty result)"
+            if evidence := _tool_evidence(messages):
+                result["output"] += f"\n\nRaw tool output:\n{evidence}"
             result["tools_used"] = [
                 call["name"] for m in messages if isinstance(m, AIMessage) for call in m.tool_calls
             ]
