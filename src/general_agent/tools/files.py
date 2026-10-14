@@ -17,6 +17,9 @@ from pypdf import PdfReader
 from general_agent.config import PROJECT_ROOT, get_settings
 from general_agent.prompts import wrap_untrusted
 
+# Name the tools/LLM use for the writable folder, independent of its real location.
+WORKSPACE_ALIAS = "workspace"
+
 
 class SandboxError(PermissionError):
     pass
@@ -82,18 +85,31 @@ class FileSandbox:
         return "\n".join(lines) or "(empty directory)"
 
     def resolve_write_target(self, raw: str) -> Path:
-        given = Path(raw.strip())
+        given = Path(raw.strip()).expanduser()
+        if given.is_absolute():
+            # Absolute paths are fine only if they already point inside the workspace.
+            target = given.resolve()
+            if not target.is_relative_to(self.write_root):
+                raise SandboxError(
+                    f"Writes are only allowed inside {WORKSPACE_ALIAS}/. "
+                    "Use a relative path such as 'notes.txt'."
+                )
+            return target
         parts = given.parts
-        if parts and parts[0] == self.write_root.name:
+        if parts and parts[0] in (WORKSPACE_ALIAS, self.write_root.name):
             given = Path(*parts[1:])  # accept "workspace/foo.txt"
         elif parts and parts[0] in {r.name for r in self.read_roots if r != self.write_root}:
             raise SandboxError(
-                f"'{parts[0]}/' is read-only; files can only be written to {self.write_root.name}/."
+                f"'{parts[0]}/' is read-only; files can only be written to {WORKSPACE_ALIAS}/."
             )
         target = (self.write_root / given).resolve()
-        if given.is_absolute() or not target.is_relative_to(self.write_root):
-            raise SandboxError(f"Writes are only allowed inside {self.write_root.name}/.")
+        if target == self.write_root or not target.is_relative_to(self.write_root):
+            raise SandboxError(f"Writes are only allowed to files inside {WORKSPACE_ALIAS}/.")
         return target
+
+    def display_path(self, target: Path) -> str:
+        """Stable, user-facing path ('workspace/...'), wherever the workspace really lives."""
+        return f"{WORKSPACE_ALIAS}/{target.relative_to(self.write_root)}"
 
     def write(self, raw: str, content: str) -> Path:
         target = self.resolve_write_target(raw)
@@ -147,10 +163,10 @@ def make_file_tools(sandbox: FileSandbox, *, require_approval: bool = True) -> l
                 {
                     "type": "approval",
                     "action": "write_file",
-                    "path": str(target.relative_to(sandbox.project_root)),
+                    "path": sandbox.display_path(target),
                     "preview": content[:500],
                     "question": f"Allow writing {len(content)} characters to "
-                    f"{target.relative_to(sandbox.project_root)}?",
+                    f"{sandbox.display_path(target)}?",
                 }
             )
             if not _is_approved(decision):
@@ -159,7 +175,7 @@ def make_file_tools(sandbox: FileSandbox, *, require_approval: bool = True) -> l
             written = sandbox.write(path, content)
         except (SandboxError, OSError) as exc:
             return f"Error: {exc}"
-        return f"Wrote {len(content)} characters to {written.relative_to(sandbox.project_root)}"
+        return f"Wrote {len(content)} characters to {sandbox.display_path(written)}"
 
     return [read_file, list_directory, write_file]
 

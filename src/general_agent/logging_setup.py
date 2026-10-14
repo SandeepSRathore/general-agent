@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 
 from rich.logging import RichHandler
 
@@ -16,5 +17,8 @@ def configure_logging(level: str = "WARNING") -> None:
         force=True,
     )
     # Third-party HTTP clients are noisy at INFO.
-    for noisy in ("httpx", "httpcore", "openai", "primp"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai", "primp"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Known upstream noise: langchain-openai's structured output stores the parsed Pydantic
+    # object in a field typed `None`, which makes Pydantic warn on every call. Harmless.
+    warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)

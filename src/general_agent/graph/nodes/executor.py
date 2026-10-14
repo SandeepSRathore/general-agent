@@ -62,7 +62,10 @@ def make_executor(deps: AgentDeps) -> Any:
             result["status"] = "failed"
             result["output"] = "Stopped: the task needed more tool steps than allowed."
         except Exception as exc:  # isolate failures: one broken task must not sink the plan
-            logger.exception("task %s failed", task["id"])
+            # Full traceback only in DEBUG; the failure itself is reported to the user.
+            logger.warning(
+                "task %s failed: %s", task["id"], exc, exc_info=logger.isEnabledFor(logging.DEBUG)
+            )
             result["status"] = "failed"
             result["output"] = f"Task failed with {exc.__class__.__name__}: {exc}"
         return {"results": {task["id"]: result}}

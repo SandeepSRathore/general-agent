@@ -175,7 +175,8 @@ def _stream(session: AgentSession, graph_input: Any, config: RunnableConfig) -> 
             for node, update in chunk.items():
                 if not isinstance(update, dict):
                     continue
-                if node == "planner" and "plan" in update:
+                # A planner update that sets pending_question routes to clarify: no plan yet.
+                if node == "planner" and "plan" in update and not update.get("pending_question"):
                     status.stop()
                     _render_plan(update["plan"])
                     status.update("[dim]Running tasks…[/dim]")

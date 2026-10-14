@@ -95,7 +95,9 @@ class Grade(BaseModel):
 JUDGE_PROMPT = """You are grading an AI assistant's answer.
 Expectation: {expectation}
 Be lenient on wording and exact live values (times, weather), strict on missing parts or
-invented facts."""
+contradictions. The assistant can read the user's notes and live tools, which you cannot
+see: do not fail an answer for extra plausible details unless they contradict the
+expectation."""
 
 
 def run_case(session: Any, case: Case) -> tuple[int, str]:

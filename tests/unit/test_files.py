@@ -64,3 +64,18 @@ def test_list_directory(sandbox: FileSandbox) -> None:
     listing = sandbox.list_dir(".")
     assert "a.txt" in listing
     assert "workspace" in sandbox.list_dir("")  # empty -> overview of roots
+
+
+def test_workspace_outside_project_root(tmp_path: Path) -> None:
+    """Regression: WORKSPACE_DIR may live anywhere; 'workspace/' stays a valid alias."""
+    ws = tmp_path / "elsewhere" / "my-ws"
+    ws.mkdir(parents=True)
+    box = FileSandbox(read_roots=[ws], write_root=ws, project_root=tmp_path / "proj", max_bytes=100)
+    target = box.resolve_write_target("workspace/haiku.txt")
+    assert target == ws / "haiku.txt"
+    assert box.display_path(target) == "workspace/haiku.txt"
+    assert box.resolve_write_target(str(ws / "abs.txt")) == ws / "abs.txt"  # absolute inside
+    with pytest.raises(SandboxError):
+        box.resolve_write_target(str(tmp_path / "haiku.txt"))  # absolute outside
+    with pytest.raises(SandboxError):
+        box.resolve_write_target("workspace")  # the folder itself is not a file
