@@ -4,6 +4,7 @@ current conditions plus a short daily forecast."""
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -32,6 +33,14 @@ WEATHER_CODES = {
 
 
 FORECAST_DAYS = 3
+
+# Small models pass placeholders when they don't know the place; geocoding them can match
+# real towns (there is a place called "Unknown"), producing confidently wrong weather.
+_PLACEHOLDER = re.compile(
+    r"^\s*((the\s+)?(unknown|n/?a|none|null|tbd|here|current|my|user'?s?|your)"
+    r"(\s+(city|location|place|town|area))?|where\s+i\s+live|location|city)?\s*$",
+    re.IGNORECASE,
+)
 
 
 class WeatherError(RuntimeError):
@@ -118,8 +127,13 @@ def _format(place: dict[str, Any], data: dict[str, Any]) -> str:
 
 @tool
 def get_weather(location: str) -> str:
-    """Get current weather and a 3-day forecast for a city or place name, e.g. 'Pune' or
-    'Paris, France'."""
+    """Get current weather and a 3-day forecast for a real city or place name, e.g. 'Pune'
+    or 'Paris, France'. Never pass a placeholder; if the place is unknown, use ask_user."""
+    if _PLACEHOLDER.match(location):
+        return (
+            f"Error: '{location}' is not a real place name. Do not guess; call ask_user to ask "
+            "the user which city they mean."
+        )
     try:
         return fetch_weather(location)
     except WeatherError as exc:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from langchain_core.tools import BaseTool
 from langgraph.store.base import BaseStore
 
+from general_agent.tools.ask_user import ask_user
 from general_agent.tools.files import FileSandbox, default_sandbox, make_file_tools
 from general_agent.tools.math_tools import calculator
 from general_agent.tools.memory_tools import make_memory_tools
@@ -23,6 +24,7 @@ def get_tools(
     return [
         get_current_time,
         get_weather,
+        ask_user,
         calculator,
         web_search,
         *make_file_tools(sandbox or default_sandbox(), require_approval=require_write_approval),

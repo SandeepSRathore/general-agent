@@ -46,7 +46,7 @@ def make_load_context(deps: AgentDeps) -> Any:
             "user_id": deps.user_id,
             "context": neutralize("\n\n".join(sections)) or "(nothing known yet)",
             # Reset per-turn fields (the checkpointer keeps the previous turn's values).
-            "clarifications": [],
+            "clarifications": None,  # extend_or_reset reducer treats None as "reset"
             "pending_question": "",
             "plan": [],
             "results": None,  # merge_results reducer treats None as "reset"

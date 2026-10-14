@@ -69,7 +69,7 @@ def make_clarify(deps: AgentDeps) -> Any:
         answer = str(interrupt({"type": "clarification", "question": question})).strip()
         return Command(
             update={
-                "clarifications": [*state.get("clarifications", []), f"Q: {question}\nA: {answer}"],
+                "clarifications": [f"Q: {question}\nA: {answer}"],  # appended by reducer
                 "messages": [AIMessage(question), HumanMessage(answer)],
                 "pending_question": "",
             },

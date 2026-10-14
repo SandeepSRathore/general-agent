@@ -268,8 +268,32 @@ curl -N localhost:8000/chat/stream -H 'Content-Type: application/json' \
   `Authorization: Bearer <token>`. The token is compared in constant time.
 - Each conversation thread handles **one turn at a time**; a concurrent request for the
   same thread gets **409**. Different threads run in parallel.
+- **Protection from malicious web pages** (DNS rebinding and CSRF): a website open in
+  your browser can't use the local API. Requests with an unknown `Host` get 400,
+  cross-site `Origin`s get 403, and non-JSON bodies get 415. `localhost`, `127.0.0.1`
+  and `::1` are always allowed; add other names (for example `my-pc.local`) to
+  `API_ALLOWED_HOSTS`. curl and scripts send no `Origin` header, so they are unaffected.
 - Message size is capped (`API_MAX_MESSAGE_CHARS`). Errors return
   `"Agent failed: <ErrorType>"` without internal details; full details go to the server log.
+
+### Screenshots (live run on `gpt-5-nano`)
+
+The built-in Swagger UI at `/docs`:
+
+![API docs](docs/screenshots/01-api-docs.png)
+
+| A file write pauses for approval (nothing is on disk yet) | `/resume` with `true`: the file is written, and the answer quotes it exactly |
+|---|---|
+| ![approval needed](docs/screenshots/03-chat-write-needs-approval.png) | ![approved](docs/screenshots/04-resume-approved-file-written.png) |
+
+| `/chat/stream`: Server-Sent Events | `GET /threads/{id}`: conversation history |
+|---|---|
+| ![SSE stream](docs/screenshots/05-chat-stream-sse.png) | ![thread history](docs/screenshots/06-thread-history.png) |
+
+[`02-chat-weather-no-location-BUG.png`](docs/screenshots/02-chat-weather-no-location-BUG.png)
+shows a bug this live run found (since fixed): with no city remembered, the model asked
+for the weather in "Unknown", and got the weather for a real place called *Unknown* in
+Bangladesh. See [lessons learned](#design-decisions-and-lessons-learned).
 
 ---
 
@@ -385,7 +409,8 @@ I live?"* finds *"The user lives in Pune."* even though the words are different.
 | Tool | What it does | Backend / cost | Safety |
 |---|---|---|---|
 | `get_current_time` | Current time in any IANA timezone | local, free | — |
-| `get_weather` | Current conditions + 3-day forecast (today, tomorrow, +1) | Open-Meteo, free, no key | timeouts, retries, errors returned as text |
+| `get_weather` | Current conditions + 3-day forecast (today, tomorrow, +1) | Open-Meteo, free, no key | timeouts, retries, errors returned as text; rejects placeholders such as "Unknown" |
+| `ask_user` | Pause and ask the user a question mid-task | local, free | `interrupt()`; the answer is recorded for memory |
 | `calculator` | Exact math: `+ - * / // % **`, sqrt, log, trig, round… | local, free | AST whitelist (never `eval`); size of every operation bounded |
 | `web_search` | Titles, URLs and snippets | DuckDuckGo, free | results marked as untrusted data |
 | `read_file` | Read `.txt`, `.md` or `.pdf` from `workspace/` or `knowledge/` | local | sandboxed, size-capped |
@@ -401,12 +426,16 @@ All tools are registered in one place: `tools/__init__.py` (`get_tools`).
 
 ## Human-in-the-loop
 
-The agent pauses with LangGraph's `interrupt()` in two situations:
+The agent pauses with LangGraph's `interrupt()` in three situations:
 
 1. **Missing information.** The planner sets `clarification_question`. The CLI shows it,
    and your answer is added to the conversation, after which planning starts again. At
    most 2 rounds are allowed, and facts from your answer (such as your city) are remembered.
-2. **File writes.** `write_file` shows a preview and asks *"Allow write_file to
+2. **Missing information discovered mid-task.** An executor calls the `ask_user` tool
+   (for example *"Which city do you live in?"*) instead of guessing. You answer exactly
+   as in case 1, and the answer goes back to that task. It is also recorded so the
+   memory step can remember it.
+3. **File writes.** `write_file` shows a preview and asks *"Allow write_file to
    workspace/…? [y/n]"*. Nothing is written unless you answer yes. Set
    `REQUIRE_WRITE_APPROVAL=false` to turn this off.
 
@@ -446,6 +475,7 @@ variables or from `.env` (names are case-insensitive).
 | `LOG_LEVEL` | `WARNING` | Set `INFO` to see each step, or `DEBUG` for full tracebacks |
 | `API_TOKEN` | — | If set, the HTTP API requires `Authorization: Bearer <token>`. Required for a non-localhost `--host` |
 | `API_MAX_MESSAGE_CHARS` | `8000` | Longest message accepted by the API |
+| `API_ALLOWED_HOSTS` | — | Extra comma-separated Host names the API accepts (localhost names are always allowed) |
 | `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | off | Optional tracing at smith.langchain.com |
 
 **Other providers:** install the integration (for example `uv add langchain-anthropic`)
@@ -497,7 +527,7 @@ that is well under one cent. `agent ingest` embeds each changed chunk once.
 ## Testing
 
 ```bash
-uv run pytest                                  # 115 offline tests, $0, ~5 s
+uv run pytest                                  # 131 offline tests, $0, ~6 s
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src                                # strict typing
 ```
@@ -520,7 +550,8 @@ What is covered:
 | Memory | Semantic ranking, dedupe, per-user isolation, idempotent ingestion, strict checkpoint round-trip, the durable-fact filter |
 | Graph | `tests/graph/`: parallel fan-out and dependency waves, clarification interrupt/resume, bounded clarifications, write approval yes/no, parallel approvals, bounded replanning, skipped replanner on success, duplicate-task filter, failure isolation, per-turn reset |
 | CLI | Interrupt loop, markup/escape-sequence sanitizing, approval-prompt spoofing |
-| HTTP API | `tests/api/`: chat, thread history, validation, clarification and approval over HTTP, SSE event order, streamed resume, 409 busy/pending, 500 without leaks, bearer auth, memories, ingest |
+| HTTP API | `tests/api/`: chat, thread history, validation, clarification and approval over HTTP, plan returned on resume, SSE event order, streamed resume, 409 busy/pending, 500 without leaks, bearer auth, DNS rebinding / CSRF guard, memories, ingest |
+| Asking mid-task | `ask_user` interrupt and resume, parallel questions answered together, answers recorded for memory, placeholder locations rejected without a network call |
 
 **Live evals (paid, optional):** `uv run python -m tests.evals.run_evals` runs 8
 multi-part prompts against throwaway databases. It checks that the number of planned
@@ -551,7 +582,7 @@ src/general_agent/
     persistence.py     SqliteSaver / SqliteStore factories
     long_term.py       save/search memories and conversations
     documents.py       idempotent knowledge/ ingestion and search
-  tools/               time, weather, math, search, files (sandbox), memory tools
+  tools/               time, weather, math, search, files (sandbox), ask_user, memory tools
 tests/
   conftest.py          offline store fixture + fake embeddings
   unit/                tool and memory tests
@@ -562,6 +593,7 @@ knowledge/             your documents for semantic search (sample: agent-concept
 workspace/             the only folder the agent may write to (gitignored contents)
 data/                  SQLite databases (gitignored)
 docs/design.md         the original design/plan this project was built from
+docs/screenshots/      screenshots from the live API test
 ```
 
 ---
@@ -587,6 +619,11 @@ docs/design.md         the original design/plan this project was built from
 - **Open-Meteo midnight edge case.** Just after local midnight, the daily forecast can
   still start at *yesterday*. We request one extra day and drop past days. Without this,
   the agent kept re-fetching a "missing" third day.
+- **Placeholders can be real places.** Asked about "the weather where I live" with
+  nothing remembered, `gpt-5-nano` called `get_weather("Unknown")`, and the geocoder
+  found a real town called *Unknown* in Bangladesh. The fix has two parts: the weather
+  tool rejects placeholders, and executors got an `ask_user` tool so they ask instead of
+  guessing. Found by the [live API test](docs/screenshots/02-chat-weather-no-location-BUG.png).
 - **The replanner is triggered by failures**, so it doesn't spend a model call reviewing
   turns that already succeeded.
 - **The first line of each tool description matters most**, because the planner only

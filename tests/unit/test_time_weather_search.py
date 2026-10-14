@@ -136,3 +136,26 @@ def test_weather_skips_yesterday_around_midnight() -> None:
     assert "2026-10-15 (today)" in out
     assert "2026-10-16 (tomorrow)" in out
     assert "2026-10-17:" in out
+
+
+@respx.mock(assert_all_called=False)
+@pytest.mark.parametrize(
+    "location",
+    [
+        "Unknown",
+        "unknown location",
+        "N/A",
+        "",
+        "my city",
+        "user's location",
+        "where I live",
+        "  none ",
+    ],
+)
+def test_weather_rejects_placeholder_locations(location: str) -> None:
+    """Live-API regression: get_weather('Unknown') geocoded to a real place named
+    'Unknown' in Bangladesh. Placeholders must fail fast and point to ask_user."""
+    route = respx.get(GEOCODE_URL)
+    out = get_weather.invoke({"location": location})
+    assert out.startswith("Error") and "ask_user" in out
+    assert not route.called  # no network call for a placeholder

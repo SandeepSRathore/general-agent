@@ -16,6 +16,7 @@ from langgraph.errors import GraphBubbleUp, GraphRecursionError
 from general_agent import prompts
 from general_agent.graph.deps import AgentDeps, format_results, now_str
 from general_agent.state import ExecutorInput, TaskResultDict
+from general_agent.tools.ask_user import ANSWER_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,22 @@ logger = logging.getLogger(__name__)
 # instead of trusting the executor's paraphrase. Kept short: input tokens cost money.
 MAX_TOOL_OUTPUT_CHARS = 1200
 MAX_TOOL_OUTPUTS_TOTAL = 3000
+
+
+def _user_answers(messages: list[Any]) -> list[str]:
+    """Q&A pairs from ask_user calls, so memory_writer can learn from them."""
+    questions = {
+        call["id"]: call["args"].get("question", "")
+        for m in messages
+        if isinstance(m, AIMessage)
+        for call in m.tool_calls
+        if call["name"] == "ask_user"
+    }
+    return [
+        f"Q: {questions[m.tool_call_id]}\nA: {m.text.removeprefix(ANSWER_PREFIX)}"
+        for m in messages
+        if isinstance(m, ToolMessage) and m.tool_call_id in questions
+    ]
 
 
 def _tool_evidence(messages: list[Any]) -> str:
@@ -56,6 +73,7 @@ def make_executor(deps: AgentDeps) -> Any:
             if payload["dependency_results"]
             else "(none)",
         )
+        answers: list[str] = []
         result: TaskResultDict = {
             "task_id": task["id"],
             "description": task["description"],
@@ -69,6 +87,7 @@ def make_executor(deps: AgentDeps) -> Any:
             )
             messages = out["messages"]
             result["output"] = messages[-1].text or "(empty result)"
+            answers = _user_answers(messages)
             if evidence := _tool_evidence(messages):
                 result["output"] += f"\n\nRaw tool output:\n{evidence}"
             result["tools_used"] = [
@@ -86,6 +105,9 @@ def make_executor(deps: AgentDeps) -> Any:
             )
             result["status"] = "failed"
             result["output"] = f"Task failed with {exc.__class__.__name__}: {exc}"
-        return {"results": {task["id"]: result}}
+        update: dict[str, Any] = {"results": {task["id"]: result}}
+        if answers:
+            update["clarifications"] = answers
+        return update
 
     return executor

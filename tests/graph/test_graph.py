@@ -335,3 +335,49 @@ def test_second_turn_resets_working_state_but_keeps_history(make_agent: Any) -> 
     out = graph.invoke(ask("turn two"), cfg())
     assert set(out["results"]) == {"t9"}
     assert [m.type for m in out["messages"]] == ["human", "ai", "human", "ai"]
+
+
+def test_executor_can_ask_the_user_mid_task(make_agent: Any) -> None:
+    """Live-API regression: with no known city the executor guessed 'Unknown'. Executors
+    can now pause and ask via the ask_user tool; the answer reaches the task and memory."""
+
+    def executor(messages: list[BaseMessage]) -> AIMessage:
+        if results := tool_results(messages):
+            return AIMessage(f"Weather for {results[-1].removeprefix('The user answered: ')}")
+        return tool_call("ask_user", {"question": "Which city do you live in?"})
+
+    plan = Plan(clarification_question=None, tasks=[task("t1", "weather where the user lives")])
+    graph, *_ = make_agent([plan], executor=executor)
+
+    first = graph.invoke(ask("What is the weather where I live?"), cfg())
+    [pending] = first["__interrupt__"]
+    assert pending.value == {"type": "clarification", "question": "Which city do you live in?"}
+
+    final = graph.invoke(Command(resume={pending.id: "Pune"}), cfg())
+    assert final["results"]["t1"]["output"].startswith("Weather for Pune")
+    # the Q&A is recorded so memory_writer can learn "the user lives in Pune"
+    assert final["clarifications"] == ["Q: Which city do you live in?\nA: Pune"]
+
+
+def test_parallel_ask_user_answers_are_all_recorded(make_agent: Any) -> None:
+    def executor(messages: list[BaseMessage]) -> AIMessage:
+        if results := tool_results(messages):
+            return AIMessage(results[-1])
+        q = "Which city?" if "weather" in first_human_text(messages) else "Which timezone?"
+        return tool_call("ask_user", {"question": q})
+
+    plan = Plan(
+        clarification_question=None,
+        tasks=[task("t1", "weather for the user"), task("t2", "time for the user")],
+    )
+    graph, *_ = make_agent([plan], executor=executor)
+    first = graph.invoke(ask("weather and time"), cfg())
+    answers = {
+        i.id: ("Pune" if i.value["question"] == "Which city?" else "IST")
+        for i in first["__interrupt__"]
+    }
+    final = graph.invoke(Command(resume=answers), cfg())
+    assert sorted(final["clarifications"]) == [
+        "Q: Which city?\nA: Pune",
+        "Q: Which timezone?\nA: IST",
+    ]

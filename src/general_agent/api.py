@@ -265,6 +265,9 @@ def _collect(session: AgentSession, thread_id: str, graph_input: Any) -> TurnRes
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR, f"Agent failed: {exc.__class__.__name__}"
         ) from exc
+    if not plan:
+        # On /resume the planner doesn't run again, so report the plan from saved state.
+        plan = list(session.graph.get_state(_config(session, thread_id)).values.get("plan", []))
     return TurnResponse(
         thread_id=thread_id,
         status="interrupted" if interrupts else "completed",

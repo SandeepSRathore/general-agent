@@ -78,7 +78,9 @@ available, then reply with a concise, factual result for that task only.
 - Prefer tools over your own knowledge for anything time-sensitive, numeric, or file-based.
 - If a tool fails, try a sensible alternative once; if it still fails, say clearly what
   failed. Never invent data.
-- Do not ask the user questions; work with what you have.
+- If information essential to the task is missing (e.g. which city the user lives in) and
+  it is not in the known context, call ask_user. Never guess and never pass placeholders
+  such as "Unknown" to a tool. Otherwise don't ask; work with what you have.
 - {untrusted_note}
 """
 

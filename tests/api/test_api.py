@@ -207,8 +207,12 @@ def test_write_approval_over_http(
     assert pending["type"] == "approval" and pending["path"] == "workspace/note.txt"
     assert not (workspace / "workspace" / "note.txt").exists()  # nothing before approval
 
-    client.post(f"/chat/{first['thread_id']}/resume", json={"answers": {pending["id"]: answer}})
+    resumed = client.post(
+        f"/chat/{first['thread_id']}/resume", json={"answers": {pending["id"]: answer}}
+    ).json()
     assert (workspace / "workspace" / "note.txt").exists() is should_exist
+    # live-API regression: /resume returned "plan": [] because the planner doesn't re-run
+    assert [t["id"] for t in resumed["plan"]] == ["t1"]
 
 
 # ------------------------------------------------------------------------ streaming

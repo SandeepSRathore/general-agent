@@ -44,6 +44,14 @@ def merge_results(
     return {**(left or {}), **right}
 
 
+def extend_or_reset(left: list[str] | None, right: list[str] | None) -> list[str]:
+    """Reducer for `clarifications`: the clarify node and parallel executors (via ask_user)
+    each append their Q&A; `None` resets the list at the start of a new user turn."""
+    if right is None:
+        return []
+    return [*(left or []), *right]
+
+
 class AgentState(TypedDict, total=False):
     # Conversation history for this thread (short-term memory, persisted by the checkpointer).
     messages: Annotated[list[AnyMessage], add_messages]
@@ -51,7 +59,7 @@ class AgentState(TypedDict, total=False):
     # Per-turn working fields (reset by load_context on every new user message).
     input: str
     context: str
-    clarifications: list[str]
+    clarifications: Annotated[list[str], extend_or_reset]
     plan: list[TaskDict]
     results: Annotated[dict[str, TaskResultDict], merge_results]
     replans: int
