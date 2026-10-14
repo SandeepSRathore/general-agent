@@ -79,4 +79,6 @@ def ingest_directory(
 
 
 def search_documents(store: BaseStore, query: str, limit: int = 4) -> list[SearchItem]:
+    if not query.strip():  # embedding APIs reject empty input
+        return []
     return store.search(DOCS_NS, query=query, limit=limit)

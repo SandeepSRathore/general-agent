@@ -47,12 +47,7 @@ def fetch_weather(location: str, client: httpx.Client | None = None) -> str:
     owns_client = client is None
     client = client or _client()
     try:
-        geo = client.get(GEOCODE_URL, params={"name": location, "count": 1, "format": "json"})
-        geo.raise_for_status()
-        results = geo.json().get("results") or []
-        if not results:
-            raise WeatherError(f"Could not find a place called '{location}'.")
-        place: dict[str, Any] = results[0]
+        place = _geocode(client, location)
 
         forecast = client.get(
             FORECAST_URL,
@@ -75,6 +70,17 @@ def fetch_weather(location: str, client: httpx.Client | None = None) -> str:
     finally:
         if owns_client:
             client.close()
+
+
+def _geocode(client: httpx.Client, location: str) -> dict[str, Any]:
+    # Open-Meteo matches place *names* only, so "Paris, France" finds nothing; fall back
+    # to the part before the first comma.
+    for name in dict.fromkeys([location.strip(), location.split(",")[0].strip()]):
+        geo = client.get(GEOCODE_URL, params={"name": name, "count": 1, "format": "json"})
+        geo.raise_for_status()
+        if results := geo.json().get("results"):
+            return dict(results[0])
+    raise WeatherError(f"Could not find a place called '{location}'.")
 
 
 def _format(place: dict[str, Any], data: dict[str, Any]) -> str:

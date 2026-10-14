@@ -9,6 +9,7 @@ agent memories        list (or --clear) long-term memories
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from typing import Annotated, Any, cast
 
@@ -20,9 +21,11 @@ from langgraph.types import Command, Interrupt
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
+from rich.text import Text
 
 from general_agent.app import AgentSession, agent_session, open_memory_store
 from general_agent.config import PROJECT_ROOT, get_settings
@@ -61,6 +64,16 @@ def _require_api_key() -> None:
 
 # --------------------------------------------------------------------- rendering
 
+# C0/C1 control characters (incl. ESC, which starts ANSI terminal sequences), keeping \t \n.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def safe(text: object) -> str:
+    """Make LLM/tool-controlled text safe to print: strip terminal control sequences and
+    escape Rich markup, so model output can't restyle or spoof the UI (e.g. the approval
+    prompt)."""
+    return escape(_CONTROL_CHARS.sub("", str(text)))
+
 
 def _render_plan(plan: list[dict[str, Any]], title: str = "Plan") -> None:
     if not plan:
@@ -71,7 +84,9 @@ def _render_plan(plan: list[dict[str, Any]], title: str = "Plan") -> None:
     table.add_column("task")
     table.add_column("after", style="magenta")
     for t in plan:
-        table.add_row(t["id"], t["description"], ", ".join(t["depends_on"]) or "-")
+        table.add_row(
+            safe(t["id"]), safe(t["description"]), safe(", ".join(t["depends_on"]) or "-")
+        )
     console.print(table)
 
 
@@ -79,26 +94,34 @@ def _render_result(result: dict[str, Any]) -> None:
     ok = result["status"] == "done"
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
     tools = (
-        f" [dim](tools: {', '.join(dict.fromkeys(result['tools_used']))})[/dim]"
+        f" [dim](tools: {safe(', '.join(dict.fromkeys(result['tools_used'])))})[/dim]"
         if result["tools_used"]
         else ""
     )
-    console.print(f"  {icon} {result['task_id']}: {result['description']}{tools}")
+    console.print(f"  {icon} {safe(result['task_id'])}: {safe(result['description'])}{tools}")
 
 
 def _ask_human(intr: Interrupt) -> Any:
     payload = intr.value if isinstance(intr.value, dict) else {"question": str(intr.value)}
     if payload.get("type") == "approval":
+        # The question is built here from structured fields, never taken verbatim from the
+        # payload, and the preview is rendered as plain text, not markup.
+        action, path = safe(payload.get("action", "action")), safe(payload.get("path", "?"))
         console.print(
             Panel(
-                payload.get("preview", ""),
-                title=f"Approve {payload.get('action')} → {payload.get('path')}",
+                Text(_CONTROL_CHARS.sub("", str(payload.get("preview", "")))),
+                title=f"Preview: {action} → {path}",
                 border_style="yellow",
             )
         )
-        return "yes" if Confirm.ask(payload.get("question", "Approve?"), default=False) else "no"
+        approved = Confirm.ask(
+            f"[bold]Allow {action} to [yellow]{path}[/yellow]?[/bold]", default=False
+        )
+        return "yes" if approved else "no"
     console.print("[yellow]🤔 The agent needs more information.[/yellow]")
-    return Prompt.ask(f"[bold yellow]{payload.get('question', 'Please clarify')}[/bold yellow]")
+    return Prompt.ask(
+        f"[bold yellow]{safe(payload.get('question', 'Please clarify'))}[/bold yellow]"
+    )
 
 
 # ------------------------------------------------------------------------- runner
@@ -140,7 +163,13 @@ def _stream(session: AgentSession, graph_input: Any, config: RunnableConfig) -> 
                         live = Live(console=console, refresh_per_second=12)
                         live.start()
                     answer += message.text
-                    live.update(Panel(Markdown(answer), title="Answer", border_style="green"))
+                    live.update(
+                        Panel(
+                            Markdown(_CONTROL_CHARS.sub("", answer)),
+                            title="Answer",
+                            border_style="green",
+                        )
+                    )
                 continue
 
             for node, update in chunk.items():
@@ -164,7 +193,13 @@ def _stream(session: AgentSession, graph_input: Any, config: RunnableConfig) -> 
                     if live is None:  # model did not stream: render the full answer once
                         status.stop()
                         answer = update.get("final_answer", "")
-                        console.print(Panel(Markdown(answer), title="Answer", border_style="green"))
+                        console.print(
+                            Panel(
+                                Markdown(_CONTROL_CHARS.sub("", answer)),
+                                title="Answer",
+                                border_style="green",
+                            )
+                        )
                         status.start()
     finally:
         if live is not None:
@@ -227,7 +262,7 @@ def chat(
             except KeyboardInterrupt:
                 console.print("[yellow]Cancelled.[/yellow]")
             except Exception as exc:  # keep the REPL alive; details go to the log
-                console.print(f"[red]Error: {exc.__class__.__name__}: {exc}[/red]")
+                console.print(f"[red]Error: {exc.__class__.__name__}: {safe(exc)}[/red]")
 
 
 @app.command()
@@ -281,9 +316,8 @@ def _print_memory_items(items: list[Any]) -> None:
         console.print("[dim]No memories yet. Tell me about yourself![/dim]")
         return
     for item in items:
-        console.print(
-            f"• {item.value['text']} [dim]({item.value.get('created_at', '')[:10]})[/dim]"
-        )
+        created = safe(item.value.get("created_at", "")[:10])
+        console.print(f"• {safe(item.value['text'])} [dim]({created})[/dim]")
 
 
 def _ingest(session: AgentSession) -> None:
@@ -298,7 +332,7 @@ def _ingest_into(store: Any, directory: Any) -> None:
         f"Unchanged: {len(report.unchanged)}. Removed: {len(report.removed)}."
     )
     for name in report.indexed:
-        console.print(f"  + {name}")
+        console.print(f"  + {safe(name)}")
 
 
 if __name__ == "__main__":

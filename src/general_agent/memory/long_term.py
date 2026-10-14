@@ -44,6 +44,8 @@ def save_memory(
 
 
 def search_memories(store: BaseStore, user_id: str, query: str, limit: int = 5) -> list[SearchItem]:
+    if not query.strip():  # embedding APIs reject empty input
+        return []
     return store.search(memories_ns(user_id), query=query, limit=limit)
 
 
@@ -69,6 +71,8 @@ def save_conversation(
 def search_conversations(
     store: BaseStore, user_id: str, query: str, limit: int = 3
 ) -> list[SearchItem]:
+    if not query.strip():
+        return []
     return store.search(conversations_ns(user_id), query=query, limit=limit)
 
 

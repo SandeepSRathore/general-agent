@@ -82,3 +82,22 @@ def test_web_search_formats_and_handles_errors(monkeypatch: pytest.MonkeyPatch) 
     out = web_search_module.web_search.invoke({"query": "langgraph"})
     assert "https://x.dev" in out and "<untrusted_data>" in out
     assert web_search_module.web_search.invoke({"query": "boom"}).startswith("Error")
+
+
+@respx.mock
+def test_weather_falls_back_to_name_before_comma() -> None:
+    def geocode(request: httpx.Request) -> httpx.Response:
+        if request.url.params["name"] == "Pune":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"name": "Pune", "country": "India", "latitude": 18.5, "longitude": 73.8}
+                    ]
+                },
+            )
+        return httpx.Response(200, json={})
+
+    respx.get(GEOCODE_URL).mock(side_effect=geocode)
+    respx.get(FORECAST_URL).mock(return_value=httpx.Response(200, json=FORECAST_JSON))
+    assert "Pune, India" in get_weather.invoke({"location": "Pune, Maharashtra"})

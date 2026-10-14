@@ -83,3 +83,10 @@ def test_checkpointer_roundtrip_with_strict_serde(tmp_path: Path) -> None:
     with open_checkpointer(db) as cp:  # fresh connection = like restarting the app
         state = builder.compile(checkpointer=cp).get_state(cfg)
     assert [m.content for m in state.values["messages"]] == ["hi", "hi back"]
+
+
+def test_empty_queries_short_circuit(store: SqliteStore) -> None:
+    long_term.save_memory(store, USER, "The user lives in Pune.")
+    assert long_term.search_memories(store, USER, "  ") == []
+    assert long_term.search_conversations(store, USER, "") == []
+    assert documents.search_documents(store, "") == []

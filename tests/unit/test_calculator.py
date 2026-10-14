@@ -61,3 +61,29 @@ def test_huge_intermediate_results_are_rejected(expr: str) -> None:
     """Regression: nested/chained big-int ops must fail fast instead of exhausting CPU/RAM."""
     with pytest.raises(CalculatorError, match="too large"):
         safe_eval(expr)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "round(5, -10**9)",  # CPython would compute 10**(10**9) internally
+        "round(5, 10**9)",
+        "(-8) ** 0.5",  # complex result
+        "floor(1e308) * floor(1e308)",
+        "1e308 * 10",  # float overflow to inf
+        "+".join(["1"] * 140),  # too many AST nodes
+        "-" * 290 + "1",
+    ],
+)
+def test_resource_and_domain_abuse_is_rejected_fast(expr: str) -> None:
+    import time
+
+    start = time.perf_counter()
+    with pytest.raises(CalculatorError):
+        safe_eval(expr)
+    assert time.perf_counter() - start < 0.5
+
+
+def test_big_integers_are_exact() -> None:
+    assert calculator.invoke({"expression": "2 ** 100"}) == str(2**100)
+    assert calculator.invoke({"expression": "round(3.14159, 2)"}) == "3.14"

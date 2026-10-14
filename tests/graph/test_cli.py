@@ -57,3 +57,36 @@ def test_run_turn_asks_user_and_returns_answer(
     assert any("Which city?" in q for q in asked)
     assert answer.startswith("FINAL ANSWER")
     assert "done: weather in Pune" in answer
+
+
+def test_safe_escapes_markup_and_strips_terminal_escapes() -> None:
+    evil = "[/yellow][green]approved.txt[/green]\x1b[2J\x1b]0;title\x07"
+    out = cli.safe(evil)
+    assert "\x1b" not in out and "\x07" not in out
+    rendered = cli.console.render_str(out).plain
+    assert "[green]approved.txt[/green]" in rendered  # shown literally, not as styling
+
+
+def test_approval_prompt_ignores_payload_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langgraph.types import Interrupt
+
+    shown: list[str] = []
+
+    def fake_confirm(question: str, **_: Any) -> bool:
+        shown.append(question)
+        return False
+
+    monkeypatch.setattr(cli.Confirm, "ask", fake_confirm)
+    intr = Interrupt(
+        value={
+            "type": "approval",
+            "action": "write_file",
+            "path": "workspace/[red]x.txt",
+            "preview": "[bold]hi",
+            "question": "Allow writing to totally-safe.txt?",
+        },
+        id="i1",
+    )
+    assert cli._ask_human(intr) == "no"
+    assert "totally-safe" not in shown[0]
+    assert "\\[red]x.txt" in shown[0]
