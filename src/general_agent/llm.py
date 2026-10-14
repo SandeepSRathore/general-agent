@@ -25,6 +25,8 @@ def _api_key_kwargs() -> dict[str, Any]:
 def _chat_model(model: str) -> BaseChatModel:
     # max_retries: the SDK retries rate limits / transient 5xx with exponential backoff.
     kwargs: dict[str, Any] = {"max_retries": 3, **_api_key_kwargs()}
+    if effort := get_settings().reasoning_effort:
+        kwargs["reasoning_effort"] = effort
     return cast(BaseChatModel, init_chat_model(model, **kwargs))
 
 

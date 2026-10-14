@@ -24,8 +24,14 @@ class Settings(BaseSettings):
     # --- LLM / embeddings -------------------------------------------------
     openai_api_key: SecretStr | None = None
     # "provider:model" strings understood by langchain's init_chat_model.
-    planner_model: str = "openai:gpt-5.6-terra"
-    executor_model: str = "openai:gpt-5.4-mini"
+    # Defaults favour minimal cost over quality: gpt-5-nano is OpenAI's cheapest model.
+    # NOTE: gpt-5-nano is deprecated and shuts down 2026-12-11; switch to
+    # "openai:gpt-5.6-luna" (cheapest non-deprecated) before then.
+    planner_model: str = "openai:gpt-5-nano"
+    executor_model: str = "openai:gpt-5-nano"
+    # Reasoning models bill hidden reasoning tokens as output; "minimal" keeps that lowest.
+    # Set to empty for models without a reasoning_effort parameter.
+    reasoning_effort: str | None = "minimal"
     embedding_model: str = "text-embedding-3-small"
     embedding_dims: int = 1536
 

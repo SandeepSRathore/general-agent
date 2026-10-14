@@ -143,6 +143,11 @@ replanner → synthesizer.
 
 ### Changing models or provider
 
+By default both roles use **`gpt-5-nano` with `REASONING_EFFORT=minimal`**, the cheapest
+setup, which trades quality for cost. `gpt-5-nano` shuts down on 2026-12-11; switch to
+`openai:gpt-5.6-luna` (the cheapest model that isn't deprecated) before then. For better plans and
+answers, try `PLANNER_MODEL=openai:gpt-5.6-terra` and `EXECUTOR_MODEL=openai:gpt-5.4-mini`.
+
 Models are `provider:model` strings in `.env` (`PLANNER_MODEL`, `EXECUTOR_MODEL`). To use
 another provider, install its package (e.g. `uv add langchain-anthropic`) and set, for
 example, `PLANNER_MODEL=anthropic:claude-sonnet-5-5`. Embeddings are configured in `llm.py`.
