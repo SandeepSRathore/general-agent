@@ -233,7 +233,8 @@ curl -s localhost:8000/chat/a1b2c3d4e5f6/resume -H 'Content-Type: application/js
 # {"status":"completed","answer":"Pune is clear, 25°C …", …}
 ```
 
-- **Clarifications** take a text answer.
+- **Clarifications** take a text answer. Their payload includes a `note` reminding the
+  user never to share secrets, because the question is written by the model.
 - **File-write approvals** (`"type": "approval"`, with `path` and `preview`) take
   `true`/`false` or `"yes"`/`"no"`. Nothing is written unless you approve.
 - You must answer **every** pending interrupt id in one call (422 lists the expected ids).
@@ -519,6 +520,8 @@ that is well under one cent. `agent ingest` embeds each changed chunk once.
 | Terminal / UI spoofing | Model text is printed with markup escaped and control characters stripped; the approval question is built from structured fields, never taken from model text | `cli.py` (`safe`) |
 | Tampered checkpoint database | Strict, safe-types-only deserialization (`allowed_msgpack_modules=None`) | `memory/persistence.py` |
 | Secrets in memory | Prompt rule plus a regex filter before saving | `graph/nodes/memory_writer.py` |
+| Memory poisoning through model-written questions | Every saved fact must share content words with what the **user typed** (message or answers); questions are passed only as untrusted context, so a bare "yes" confirms nothing. Questions can't forge an `A:` line | `memory_writer.grounded_in_user_words`, `state.format_qa` |
+| Phishing via questions (e.g. "paste your API key") | `ask_user` refuses questions asking for passwords, keys, tokens, codes or payment details; every question carries a "never share secrets" note, and the CLI shows a fixed warning | `tools/ask_user.py`, `cli.py` |
 | Runaway loops / cost | Caps on tasks, replans, clarifications, executor steps and the recursion limit; duplicate retries are discarded | `config.py`, replanner |
 | Leaked keys | `.env` is gitignored; keys are `SecretStr` | `.gitignore`, `config.py` |
 
@@ -527,7 +530,7 @@ that is well under one cent. `agent ingest` embeds each changed chunk once.
 ## Testing
 
 ```bash
-uv run pytest                                  # 131 offline tests, $0, ~6 s
+uv run pytest                                  # 146 offline tests, $0, ~6 s
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src                                # strict typing
 ```
@@ -552,6 +555,7 @@ What is covered:
 | CLI | Interrupt loop, markup/escape-sequence sanitizing, approval-prompt spoofing |
 | HTTP API | `tests/api/`: chat, thread history, validation, clarification and approval over HTTP, plan returned on resume, SSE event order, streamed resume, 409 busy/pending, 500 without leaks, bearer auth, DNS rebinding / CSRF guard, memories, ingest |
 | Asking mid-task | `ask_user` interrupt and resume, parallel questions answered together, answers recorded for memory, placeholder locations rejected without a network call |
+| Injection hardening | Memory poisoning via a crafted question + "yes", forged `A:` lines, `ask_user` refusing secret requests, the fixed CLI phishing warning |
 
 **Live evals (paid, optional):** `uv run python -m tests.evals.run_evals` runs 8
 multi-part prompts against throwaway databases. It checks that the number of planned

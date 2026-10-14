@@ -44,6 +44,17 @@ def merge_results(
     return {**(left or {}), **right}
 
 
+def format_qa(question: str, answer: str) -> str:
+    """One clarification record. The question is MODEL-written (untrusted); collapsing its
+    whitespace stops a crafted question from forging an 'A:' line, i.e. fake user words."""
+    return f"Q: {' '.join(question.split())}\nA: {answer.strip()}"
+
+
+def split_qa(record: str) -> tuple[str, str]:
+    question, _, answer = record.removeprefix("Q: ").partition("\nA: ")
+    return question, answer
+
+
 def extend_or_reset(left: list[str] | None, right: list[str] | None) -> list[str]:
     """Reducer for `clarifications`: the clarify node and parallel executors (via ask_user)
     each append their Q&A; `None` resets the list at the start of a new user turn."""

@@ -15,7 +15,7 @@ from langgraph.errors import GraphBubbleUp, GraphRecursionError
 
 from general_agent import prompts
 from general_agent.graph.deps import AgentDeps, format_results, now_str
-from general_agent.state import ExecutorInput, TaskResultDict
+from general_agent.state import ExecutorInput, TaskResultDict, format_qa
 from general_agent.tools.ask_user import ANSWER_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def _user_answers(messages: list[Any]) -> list[str]:
         if call["name"] == "ask_user"
     }
     return [
-        f"Q: {questions[m.tool_call_id]}\nA: {m.text.removeprefix(ANSWER_PREFIX)}"
+        format_qa(questions[m.tool_call_id], m.text.removeprefix(ANSWER_PREFIX))
         for m in messages
         if isinstance(m, ToolMessage) and m.tool_call_id in questions
     ]

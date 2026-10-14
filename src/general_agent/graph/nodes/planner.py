@@ -17,8 +17,9 @@ from langgraph.types import Command, interrupt
 from general_agent import prompts
 from general_agent.graph.deps import AgentDeps, format_history, now_str
 from general_agent.graph.nodes.dispatch import ready_sends, sanitize_tasks
-from general_agent.state import AgentState, Plan
+from general_agent.state import AgentState, Plan, format_qa
 from general_agent.tools import describe_tools
+from general_agent.tools.ask_user import SAFETY_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,11 @@ def make_clarify(deps: AgentDeps) -> Any:
         question = state.get("pending_question", "")
         # interrupt() must come first: on resume the node re-runs from the top and
         # interrupt() then returns the user's answer instead of pausing.
-        answer = str(interrupt({"type": "clarification", "question": question})).strip()
+        payload = {"type": "clarification", "question": question, "note": SAFETY_NOTE}
+        answer = str(interrupt(payload)).strip()
         return Command(
             update={
-                "clarifications": [f"Q: {question}\nA: {answer}"],  # appended by reducer
+                "clarifications": [format_qa(question, answer)],  # appended by reducer
                 "messages": [AIMessage(question), HumanMessage(answer)],
                 "pending_question": "",
             },

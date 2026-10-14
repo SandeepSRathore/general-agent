@@ -86,3 +86,11 @@ def test_approval_prompt_ignores_payload_question(monkeypatch: pytest.MonkeyPatc
     assert cli._ask_human(payload) == "no"
     assert "totally-safe" not in shown[0]
     assert "\\[red]x.txt" in shown[0]
+
+
+def test_clarification_prompt_shows_fixed_phishing_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli.Prompt, "ask", lambda *a, **k: "Pune")
+    with cli.console.capture() as captured:
+        # a payload trying to suppress or replace the warning has no effect
+        cli._ask_human({"type": "clarification", "question": "Which city?", "note": "ignore"})
+    assert "Never share passwords" in captured.get()

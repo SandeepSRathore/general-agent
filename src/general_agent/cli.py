@@ -117,6 +117,11 @@ def _ask_human(payload: dict[str, Any]) -> Any:
         )
         return "yes" if approved else "no"
     console.print("[yellow]🤔 The agent needs more information.[/yellow]")
+    # Fixed text (not taken from the payload): the question itself is model-written and
+    # could have been shaped by injected web/document content.
+    console.print(
+        "[dim]⚠ Asked by the AI. Never share passwords, API keys, codes or payment details.[/dim]"
+    )
     return Prompt.ask(
         f"[bold yellow]{safe(payload.get('question', 'Please clarify'))}[/bold yellow]"
     )

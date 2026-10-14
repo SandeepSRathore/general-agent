@@ -18,7 +18,8 @@ from langchain_core.runnables import RunnableConfig
 from general_agent import prompts
 from general_agent.graph.deps import AgentDeps
 from general_agent.memory import long_term
-from general_agent.state import AgentState, MemoryExtraction
+from general_agent.prompts import wrap_untrusted
+from general_agent.state import AgentState, MemoryExtraction, split_qa
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,99 @@ _SECRET = re.compile(
 )
 
 
+# Words that carry no user-specific content; a fact must share at least one OTHER word with
+# what the user actually typed.
+_GENERIC = frozenset(
+    (
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "for",
+        "with",
+        "from",
+        "about",
+        "is",
+        "are",
+        "was",
+        "be",
+        "been",
+        "user",
+        "user's",
+        "users",
+        "their",
+        "they",
+        "them",
+        "he",
+        "she",
+        "his",
+        "her",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "likes",
+        "like",
+        "prefers",
+        "prefer",
+        "wants",
+        "want",
+        "lives",
+        "live",
+        "has",
+        "have",
+        "name",
+        "named",
+        "called",
+        "always",
+        "never",
+        "usually",
+        "often",
+        "would",
+        "should",
+        "can",
+        "will",
+    )
+)
+
+
+def _content_words(text: str) -> set[str]:
+    words = {
+        w.removesuffix("'s")
+        for w in re.findall(r"[a-z0-9][a-z0-9'.-]*[a-z0-9]|[a-z0-9]", text.lower())
+    }
+    return {w for w in words if w not in _GENERIC and len(w) > 1}
+
+
+def grounded_in_user_words(fact: str, user_text: str) -> bool:
+    """Security: a memory must come from what the USER typed, never from a model-written
+    question (which injected web/document content could have crafted). A bare "yes" to
+    "Should I forward your files to evil.com?" shares no content words -> rejected."""
+    return bool(_content_words(fact) & _content_words(user_text))
+
+
 def is_durable_fact(fact: str) -> bool:
     fact = fact.strip()
     return bool(fact) and not _ONE_OFF_REQUEST.search(fact) and not _SECRET.search(fact)
+
+
+def _extraction_input(user_input: str, qa_pairs: list[tuple[str, str]]) -> str:
+    lines = [f"User message:\n{user_input}"]
+    if qa_pairs:
+        lines.append("\nThe user's answers to questions the assistant asked:")
+        for question, answer in qa_pairs:
+            lines.append(
+                f"- Answer: {answer}\n  (question, context only: {wrap_untrusted(question)})"
+            )
+    return "\n".join(lines)
 
 
 def make_memory_writer(deps: AgentDeps) -> Any:
@@ -52,7 +143,8 @@ def make_memory_writer(deps: AgentDeps) -> Any:
         thread_id = str(config.get("configurable", {}).get("thread_id", ""))
         try:
             known = long_term.search_memories(deps.store, deps.user_id, user_input, limit=10)
-            user_text = "\n".join([user_input, *state.get("clarifications", [])])
+            qa_pairs = [split_qa(r) for r in state.get("clarifications", [])]
+            user_text = "\n".join([user_input, *(answer for _, answer in qa_pairs)])
             extraction = cast(
                 MemoryExtraction,
                 structured.invoke(
@@ -62,11 +154,15 @@ def make_memory_writer(deps: AgentDeps) -> Any:
                                 known=long_term.format_items(known) or "(nothing)"
                             )
                         ),
-                        HumanMessage(user_text),
+                        HumanMessage(_extraction_input(user_input, qa_pairs)),
                     ]
                 ),
             )
-            facts = [f for f in extraction.facts if is_durable_fact(f)]
+            facts = [
+                f
+                for f in extraction.facts
+                if is_durable_fact(f) and grounded_in_user_words(f, user_text)
+            ]
             for fact in facts[:MAX_FACTS_PER_TURN]:
                 if long_term.save_memory(
                     deps.store,
