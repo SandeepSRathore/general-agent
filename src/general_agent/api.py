@@ -19,11 +19,15 @@ import threading
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractContextManager, asynccontextmanager
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from general_agent import service
 from general_agent.app import AgentSession, agent_session
@@ -110,6 +114,58 @@ class ThreadLocks:
                 status.HTTP_409_CONFLICT, "This thread is already processing a request."
             )
         return lock.release
+
+
+# ----------------------------------------------------------- browser-attack guard
+
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _hostname(value: str) -> str | None:
+    """'127.0.0.1:8000' / '[::1]:8000' / 'http://evil.com' -> bare lowercase host name."""
+    try:
+        return urlsplit(value if "//" in value else f"//{value}").hostname
+    except ValueError:
+        return None
+
+
+class BrowserAttackGuard:
+    """Protects a local API from malicious web pages open in the user's browser.
+
+    - DNS rebinding: evil.com re-resolves to 127.0.0.1, so the browser treats our API as
+      same-origin and lets the page read responses. Rejecting unknown Host headers stops it.
+    - CSRF: a page can't read cross-site responses but can still *send* requests (and
+      spend API credit). Browsers attach an Origin header to those; foreign origins are
+      rejected, and request bodies must be JSON (which cross-site forms can't send).
+    Non-browser clients (curl, scripts) send no Origin and are unaffected.
+    """
+
+    def __init__(self, app: ASGIApp, allowed_hosts: frozenset[str]) -> None:
+        self.app = app
+        self.allowed_hosts = allowed_hosts
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        problem: tuple[int, str] | None = None
+        if _hostname(headers.get("host", "")) not in self.allowed_hosts:
+            problem = (400, "Invalid Host header.")
+        elif (origin := headers.get("origin")) is not None and (
+            _hostname(origin) not in self.allowed_hosts
+        ):
+            problem = (403, "Cross-origin requests are not allowed.")
+        elif (
+            scope["method"] in ("POST", "PUT", "PATCH")
+            and int(headers.get("content-length") or 0) > 0
+            and not headers.get("content-type", "").startswith("application/json")
+        ):
+            problem = (415, "Request body must be application/json.")
+        if problem:
+            await JSONResponse({"detail": problem[1]}, status_code=problem[0])(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 # -------------------------------------------------------------------- dependencies
@@ -353,11 +409,15 @@ def ingest(session: Session) -> IngestResponse:
 
 
 def create_app(
-    session_factory: SessionFactory | None = None, api_token: str | None = None
+    session_factory: SessionFactory | None = None,
+    api_token: str | None = None,
+    allowed_hosts: list[str] | None = None,
 ) -> FastAPI:
     """App factory. Tests pass a factory that builds the agent with fake models."""
-    if api_token is None and (secret := get_settings().api_token):
+    settings = get_settings()
+    if api_token is None and (secret := settings.api_token):
         api_token = secret.get_secret_value()
+    extra_hosts = allowed_hosts if allowed_hosts is not None else settings.api_allowed_host_list
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -381,4 +441,5 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(router)
+    app.add_middleware(BrowserAttackGuard, allowed_hosts=LOCAL_HOSTS | set(extra_hosts))
     return app

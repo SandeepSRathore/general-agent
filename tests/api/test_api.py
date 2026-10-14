@@ -79,7 +79,9 @@ def make_client(store: SqliteStore, workspace: Path) -> Iterator[Callable[..., T
         def session_factory() -> Iterator[AgentSession]:
             yield AgentSession(build_graph(deps, InMemorySaver()), store, settings)
 
-        client = TestClient(create_app(session_factory, api_token=api_token))
+        client = TestClient(
+            create_app(session_factory, api_token=api_token, allowed_hosts=["testserver"])
+        )
         client.__enter__()  # run the lifespan (opens the agent session)
         clients.append(client)
         return client
@@ -294,3 +296,40 @@ def test_ingest_endpoint(make_client: Any, workspace: Path) -> None:
     first = client.post("/ingest").json()
     assert first["indexed"] == ["notes.md"] and first["chunks"] == 1
     assert client.post("/ingest").json()["unchanged"] == ["notes.md"]
+
+
+# ------------------------------------------------- browser attacks (security review)
+
+
+def test_dns_rebinding_host_is_rejected(make_client: Any) -> None:
+    """evil.com re-resolved to 127.0.0.1 arrives with Host: evil.com -> refuse."""
+    client = make_client([])
+    res = client.get("/memories", headers={"Host": "evil.com:8000"})
+    assert res.status_code == 400
+    for host in ("localhost:8000", "127.0.0.1:8000", "[::1]:8000"):
+        assert client.get("/memories", headers={"Host": host}).status_code == 200
+
+
+@pytest.mark.parametrize("origin", ["https://evil.com", "null", "http://127.0.0.1.evil.com"])
+def test_cross_origin_browser_requests_are_rejected(make_client: Any, origin: str) -> None:
+    client = make_client([no_tasks()])
+    res = client.post("/chat", json={"message": "hi"}, headers={"Origin": origin})
+    assert res.status_code == 403
+
+
+def test_same_origin_browser_requests_work(make_client: Any) -> None:
+    """The built-in /docs page (same origin) must keep working."""
+    client = make_client([no_tasks()])
+    res = client.post(
+        "/chat",
+        json={"message": "hi"},
+        headers={"Origin": "http://127.0.0.1:8000", "Host": "127.0.0.1:8000"},
+    )
+    assert res.status_code == 200
+
+
+def test_form_encoded_bodies_are_rejected(make_client: Any) -> None:
+    """A cross-site HTML form can only send form/text bodies, never application/json."""
+    client = make_client([no_tasks()])
+    res = client.post("/chat", content=b'{"message": "hi"}', headers={"Content-Type": "text/plain"})
+    assert res.status_code == 415

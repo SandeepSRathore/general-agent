@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     # Required when binding to a non-localhost address.
     api_token: SecretStr | None = None
     api_max_message_chars: int = 8000
+    # Extra Host names the API answers to, comma-separated (localhost, 127.0.0.1 and ::1
+    # are always allowed). Blocks DNS-rebinding attacks from malicious websites.
+    api_allowed_hosts: str = ""
+
+    @property
+    def api_allowed_host_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.api_allowed_hosts.split(",") if h.strip()]
 
     @property
     def checkpoints_db(self) -> Path:

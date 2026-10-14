@@ -270,6 +270,11 @@ def serve(
             "network could use your OpenAI key. Set API_TOKEN in .env or bind to 127.0.0.1."
         )
         raise typer.Exit(1)
+    if host not in LOCAL_HOSTS and not get_settings().api_allowed_host_list:
+        console.print(
+            "[yellow]Note: only localhost Host names are accepted. Add the names clients use "
+            "(e.g. my-pc.local,192.168.1.20) to API_ALLOWED_HOSTS.[/yellow]"
+        )
     import uvicorn
 
     console.print(f"Docs: http://{safe(host)}:{port}/docs")
