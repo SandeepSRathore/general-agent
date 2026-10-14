@@ -1,3 +1,8 @@
+> **Note:** This is the original design and plan the project was built from (October 2026).
+> The code has changed since then: cheapest-model defaults (`gpt-5-nano`), a replanner
+> that only runs after failures, fixes for small-model mistakes, and security hardening.
+> See the [README](../README.md) for the current behavior.
+
 # General Agent — Plan-and-Execute agent with LangGraph, SQLite memory & semantic search
 
 ## Context
