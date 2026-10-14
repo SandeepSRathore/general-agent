@@ -1,0 +1,67 @@
+[project]
+name = "general-agent"
+version = "0.1.0"
+description = "A plan-and-execute AI agent built with LangChain + LangGraph, with SQLite memory and semantic search."
+readme = "README.md"
+authors = [
+    { name = "SandeepSRathore", email = "sandeeprathore9211@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "ddgs>=9.16.0",
+    "httpx>=0.28.1",
+    "langchain>=1.4.6",
+    "langchain-openai>=1.7.2",
+    "langchain-text-splitters>=1.1.0",
+    "langgraph>=1.2.15",
+    "langgraph-checkpoint-sqlite>=3.1.2",
+    "pydantic-settings>=2.11.0",
+    "pypdf>=6.1.1",
+    "python-dotenv>=1.1.1",
+    "rich>=14.2.0",
+    "sqlite-vec>=0.1.9",
+    "typer>=0.20.0",
+    "tzdata>=2025.2",
+]
+
+[project.scripts]
+agent = "general_agent.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18.2",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.4.0",
+    "respx>=0.23.1",
+    "ruff>=0.17.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "S"]
+ignore = ["S101"]  # assert is fine in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["general_agent.graph.*", "general_agent.cli"]
+# LangGraph's generics are very loose; keep strictness but allow untyped calls into it.
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
